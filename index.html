@@ -1,0 +1,1118 @@
+Enterprise logo
+My Stuff
+Image of 
+Image of 
+Image of 
+Three.js Flood Map Visualization
+Continuous Flood Layer Visualization
+Interactive Flood Visualization with Labels
+Update GeoJSON Property Name
+Smooth 3D Flood Visualization
+Clarification Needed For Numbers
+Smooth 3D Flood Layer Visualization
+Smoothing Flood Polygons in GeoJSON
+Professional LinkedIn Photo Edit
+LinkedIn Profile Grooming Assistance
+Vector vs. Raster Graphics Explained
+Flood Visualization with 3D Extrusion
+Visualizing Continuous Water Layers
+create figure 16 just like this for me, just add an empty box besides scenario 3(in that branch level)
+Kali: Goddess or Linux?
+Happy Birthday Greeting Exchange
+Conversation with Gemini
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Delhi NCR Flood Visualization</title>
+
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
+
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+
+        body { margin: 0; padding: 0; overflow: hidden; font-family: Arial, sans-serif; }
+
+        #map { width: 100vw; height: 100vh; }
+
+
+
+        #legend {
+
+            position: absolute;
+
+            top: 20px;
+
+            right: 20px;
+
+            background: rgba(255,255,255,0.97);
+
+            padding: 16px 20px;
+
+            border-radius: 14px;
+
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+
+            z-index: 1000;
+
+            max-width: 270px;
+
+            backdrop-filter: blur(12px);
+
+        }
+
+        #legend h3 {
+
+            margin: 0 0 14px 0;
+
+            font-size: 18px;
+
+            color: #1e40af;
+
+            font-weight: bold;
+
+        }
+
+        .depth-legend {
+
+            margin-top: 12px;
+
+            padding: 14px;
+
+            background: #f8fafc;
+
+            border-radius: 10px;
+
+            font-size: 12px;
+
+            border: 1px solid #e2e8f0;
+
+        }
+
+        .depth-legend h4 { margin: 0 0 10px 0; font-size: 13px; color: #1e293b; }
+
+        .legend-item { display: flex; align-items: center; margin: 8px 0; }
+
+        .legend-color {
+
+            width: 34px; height: 18px; margin-right: 12px; border-radius: 5px;
+
+            border: 1px solid rgba(0,0,0,0.15);
+
+        }
+
+
+
+        #fullscreenBtn {
+
+            position: absolute;
+
+            bottom: 28px;
+
+            right: 28px;
+
+            background: rgba(30,64,175,0.95);
+
+            color: white;
+
+            border: none;
+
+            width: 56px;
+
+            height: 56px;
+
+            border-radius: 50%;
+
+            cursor: pointer;
+
+            z-index: 1000;
+
+            font-size: 26px;
+
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+
+            transition: all 0.3s ease;
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: center;
+
+        }
+
+        #fullscreenBtn:hover {
+
+            background: #1e40af;
+
+            transform: scale(1.12);
+
+        }
+
+
+
+        .depth-label {
+
+            position: absolute;
+
+            background: rgba(15, 23, 42, 0.85);
+
+            color: #e0f2fe;
+
+            padding: 3px 7px;
+
+            border-radius: 4px;
+
+            font-size: 10px;
+
+            font-weight: 600;
+
+            pointer-events: none;
+
+            white-space: nowrap;
+
+            z-index: 10;
+
+            transform: translate(-50%, -50%);
+
+            border: 1px solid rgba(100, 150, 255, 0.4);
+
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+
+            display: none;
+
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <div id="map"></div>
+
+
+
+    <div id="legend">
+
+        <h3>3D Flood Visualization</h3>
+
+        <div class="depth-legend">
+
+            <h4>Water Depth</h4>
+
+            <div class="legend-item"><div class="legend-color" style="background:#bbdefb;"></div><span>&lt; 0.5 m</span></div>
+
+            <div class="legend-item"><div class="legend-color" style="background:#42a5f5;"></div><span>0.5 – 1 m</span></div>
+
+            <div class="legend-item"><div class="legend-color" style="background:#1976d2;"></div><span>1 – 2 m</span></div>
+
+            <div class="legend-item"><div class="legend-color" style="background:#0d47a1;"></div><span>&gt; 2 m</span></div>
+
+        </div>
+
+    </div>
+
+
+
+    <button id="fullscreenBtn" title="Toggle Fullscreen">
+
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="white">
+
+            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+
+        </svg>
+
+    </button>
+
+
+
+    <script>
+
+        let map, scene, camera, renderer;
+
+        let waterMeshes = [];
+
+        let modelTransform;
+
+        let waveSpeed = 1.0;
+
+        let depthScale = 1.0;
+
+        let depthLabels = [];
+
+
+
+        const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
+
+        const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
+
+
+
+        maptilersdk.config.apiKey = API_KEY;
+
+
+
+        const customLayer = {
+
+            id: '3d-model',
+
+            type: 'custom',
+
+            renderingMode: '3d',
+
+           
+
+            onAdd: function(map, gl) {
+
+                this.camera = new THREE.Camera();
+
+                this.scene = new THREE.Scene();
+
+                camera = this.camera;
+
+                scene = this.scene;
+
+
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+
+                this.scene.add(ambientLight);
+
+
+
+                const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+
+                directionalLight1.position.set(100, 200, 100);
+
+                this.scene.add(directionalLight1);
+
+
+
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+
+                directionalLight2.position.set(-100, 100, -100);
+
+                this.scene.add(directionalLight2);
+
+
+
+                this.renderer = new THREE.WebGLRenderer({
+
+                    canvas: map.getCanvas(),
+
+                    context: gl,
+
+                    antialias: true
+
+                });
+
+                renderer = this.renderer;
+
+
+
+                this.renderer.autoClear = false;
+
+                this.renderer.shadowMap.enabled = true;
+
+            },
+
+
+
+            render: function(gl, matrix) {
+
+                const rotationX = new THREE.Matrix4().makeRotationAxis(
+
+                    new THREE.Vector3(1, 0, 0),
+
+                    modelTransform.rotateX
+
+                );
+
+                const rotationY = new THREE.Matrix4().makeRotationAxis(
+
+                    new THREE.Vector3(0, 1, 0),
+
+                    modelTransform.rotateY
+
+                );
+
+                const rotationZ = new THREE.Matrix4().makeRotationAxis(
+
+                    new THREE.Vector3(0, 0, 1),
+
+                    modelTransform.rotateZ
+
+                );
+
+
+
+                const m = new THREE.Matrix4().fromArray(matrix);
+
+                const l = new THREE.Matrix4()
+
+                    .makeTranslation(
+
+                        modelTransform.translateX,
+
+                        modelTransform.translateY,
+
+                        modelTransform.translateZ
+
+                    )
+
+                    .scale(
+
+                        new THREE.Vector3(
+
+                            modelTransform.scale,
+
+                            -modelTransform.scale,
+
+                            modelTransform.scale
+
+                        )
+
+                    )
+
+                    .multiply(rotationX)
+
+                    .multiply(rotationY)
+
+                    .multiply(rotationZ);
+
+
+
+                this.camera.projectionMatrix = m.multiply(l);
+
+               
+
+                const time = performance.now() * 0.001;
+
+                waterMeshes.forEach(mesh => {
+
+                    if (mesh.material.uniforms) {
+
+                        mesh.material.uniforms.time.value = time * waveSpeed;
+
+                    }
+
+                });
+
+
+
+                this.renderer.resetState();
+
+                this.renderer.render(this.scene, this.camera);
+
+                map.triggerRepaint();
+
+
+
+                // Update depth labels visibility and position based on zoom
+
+                updateDepthLabels();
+
+            }
+
+        };
+
+
+
+        map = new maptilersdk.Map({
+
+            container: 'map',
+
+            style: maptilersdk.MapStyle.STREETS,
+
+            center: [77.027, 28.448],
+
+            zoom: 16,
+
+            pitch: 60,
+
+            bearing: -20,
+
+            antialias: true
+
+        });
+
+
+
+        map.on('style.load', function() {
+
+            map.addLayer({
+
+                'id': '3d-buildings',
+
+                'source': 'composite',
+
+                'source-layer': 'building',
+
+                'filter': ['==', 'extrude', 'true'],
+
+                'type': 'fill-extrusion',
+
+                'minzoom': 14,
+
+                'paint': {
+
+                    'fill-extrusion-color': '#e0e0e0',
+
+                    'fill-extrusion-height': [
+
+                        'interpolate',
+
+                        ['linear'],
+
+                        ['zoom'],
+
+                        14, 0,
+
+                        14.5, ['get', 'height']
+
+                    ],
+
+                    'fill-extrusion-base': [
+
+                        'interpolate',
+
+                        ['linear'],
+
+                        ['zoom'],
+
+                        14, 0,
+
+                        14.5, ['get', 'min_height']
+
+                    ],
+
+                    'fill-extrusion-opacity': 0.9
+
+                }
+
+            });
+
+
+
+            const modelOrigin = [77.027, 28.448];
+
+            const modelAltitude = 0;
+
+            const modelRotate = [Math.PI / 2, 0, 0];
+
+
+
+            const modelAsMercatorCoordinate = maptilersdk.MercatorCoordinate.fromLngLat(
+
+                modelOrigin,
+
+                modelAltitude
+
+            );
+
+
+
+            modelTransform = {
+
+                translateX: modelAsMercatorCoordinate.x,
+
+                translateY: modelAsMercatorCoordinate.y,
+
+                translateZ: modelAsMercatorCoordinate.z,
+
+                rotateX: modelRotate[0],
+
+                rotateY: modelRotate[1],
+
+                rotateZ: modelRotate[2],
+
+                scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
+
+            };
+
+
+
+            map.addLayer(customLayer);
+
+            loadFloodData();
+
+        });
+
+
+
+        async function loadFloodData() {
+
+            try {
+
+                const res = await fetch(GEOJSON_FILE);
+
+                if (!res.ok) throw new Error('File not found');
+
+                const data = await res.json();
+
+                createWaterLayer(data);
+
+            } catch (err) {
+
+                alert('Error: Could not load gridded_30m_T1_flood_only.geojson\nMake sure it is in the same folder.\n\n' + err.message);
+
+            }
+
+        }
+
+
+
+        function createWaterLayer(geojsonData) {
+
+            if (!scene) return;
+
+
+
+            // Clear existing water meshes
+
+            waterMeshes.forEach(mesh => {
+
+                scene.remove(mesh);
+
+                if (mesh.geometry) mesh.geometry.dispose();
+
+                if (mesh.material) mesh.material.dispose();
+
+            });
+
+            waterMeshes = [];
+
+
+
+            // Clear existing labels
+
+            depthLabels.forEach(label => label.element.remove());
+
+            depthLabels = [];
+
+
+
+            if (geojsonData.type !== 'FeatureCollection') {
+
+                alert('Invalid GeoJSON format');
+
+                return;
+
+            }
+
+
+
+            let minDepth = Infinity;
+
+            let maxDepth = -Infinity;
+
+            let polygonCount = 0;
+
+
+
+            // Create individual water mesh for EACH polygon
+
+            geojsonData.features.forEach(feature => {
+
+                if (!feature.geometry || !feature.properties) return;
+
+               
+
+                const depth = parseFloat(feature.properties.value);
+
+                if (isNaN(depth) || depth <= 0) return;
+
+
+
+                minDepth = Math.min(minDepth, depth);
+
+                maxDepth = Math.max(maxDepth, depth);
+
+
+
+                if (feature.geometry.type === 'Polygon') {
+
+                    const coords = feature.geometry.coordinates[0];
+
+                    createPolygonWater(coords, depth, maxDepth);
+
+                   
+
+                    // Calculate polygon centroid for label positioning
+
+                    const centroid = calculateCentroid(coords);
+
+                    createDepthLabel(centroid, depth);
+
+                   
+
+                    polygonCount++;
+
+                }
+
+            });
+
+
+
+            console.log(`Loaded ${polygonCount} water polygons. Depth: ${minDepth}-${maxDepth}m`);
+
+        }
+
+
+
+        function createPolygonWater(coordinates, depth, maxDepth) {
+
+            // Convert lat/lng to local 3D coordinates
+
+            const points = [];
+
+            coordinates.forEach(coord => {
+
+                const mercator = maptilersdk.MercatorCoordinate.fromLngLat([coord[0], coord[1]]);
+
+                const x = (mercator.x - modelTransform.translateX) / modelTransform.scale;
+
+                const y = (mercator.y - modelTransform.translateY) / modelTransform.scale;
+
+                points.push(new THREE.Vector2(x, y));
+
+            });
+
+
+
+            if (points.length < 3) return;
+
+
+
+            // Create shape from polygon
+
+            const shape = new THREE.Shape(points);
+
+            const geometry = new THREE.ShapeGeometry(shape, 24);
+
+           
+
+            // Rotate to horizontal
+
+            geometry.rotateX(-Math.PI / 2);
+
+            geometry.computeVertexNormals();
+
+
+
+            const scaledDepth = depth * depthScale;
+
+
+
+            // Water shader material
+
+            const waterMaterial = new THREE.ShaderMaterial({
+
+                uniforms: {
+
+                    time: { value: 0 },
+
+                    depth: { value: depth },
+
+                    scaledDepth: { value: scaledDepth },
+
+                    maxDepth: { value: maxDepth },
+
+                    opacity: { value: 0.7 }
+
+                },
+
+                vertexShader: `
+
+                    uniform float time;
+
+                    uniform float scaledDepth;
+
+                   
+
+                    varying vec2 vUv;
+
+                    varying vec3 vPosition;
+
+                    varying float vElevation;
+
+                    varying vec3 vNormal;
+
+                   
+
+                    void main() {
+
+                        vUv = uv;
+
+                        vPosition = position;
+
+                        vec3 pos = position;
+
+                       
+
+                        // Wave effects
+
+                        float wave = 0.0;
+
+                        wave += sin(pos.x * 0.008 + time * 0.5) * 0.8;
+
+                        wave += sin(pos.z * 0.01 - time * 0.4) * 0.6;
+
+                        wave += sin(pos.x * 0.015 + pos.z * 0.012 + time * 0.8) * 0.5;
+
+                        wave += cos(pos.x * 0.02 - pos.z * 0.015 - time * 0.6) * 0.4;
+
+                       
+
+                        // Ripples
+
+                        wave += sin(pos.x * 0.05 + pos.z * 0.05 + time * 2.0) * 0.15;
+
+                       
+
+                        vElevation = wave;
+
+                       
+
+                        // Position water surface at depth height
+
+                        pos.y = scaledDepth + wave;
+
+                       
+
+                        // Calculate normal
+
+                        vec3 tangent = normalize(vec3(1.0,
+
+                            cos(pos.x * 0.008 + time * 0.5) * 0.0064,
+
+                            0.0));
+
+                        vec3 bitangent = normalize(vec3(0.0,
+
+                            sin(pos.z * 0.01 - time * 0.4) * 0.006,
+
+                            1.0));
+
+                        vNormal = normalize(cross(tangent, bitangent));
+
+                       
+
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+
+                    }
+
+                `,
+
+                fragmentShader: `
+
+                    uniform float opacity;
+
+                    uniform float time;
+
+                    uniform float depth;
+
+                    uniform float maxDepth;
+
+                   
+
+                    varying vec2 vUv;
+
+                    varying vec3 vPosition;
+
+                    varying float vElevation;
+
+                    varying vec3 vNormal;
+
+                   
+
+                    vec3 getDepthColor(float d, float maxD) {
+
+                        vec3 color1 = vec3(0.73, 0.87, 0.98); // < 0.5m
+
+                        vec3 color2 = vec3(0.26, 0.65, 0.96); // 0.5-1m
+
+                        vec3 color3 = vec3(0.10, 0.46, 0.82); // 1-2m
+
+                        vec3 color4 = vec3(0.05, 0.28, 0.63); // > 2m
+
+                       
+
+                        if (d < 0.5) {
+
+                            return color1;
+
+                        } else if (d < 1.0) {
+
+                            return mix(color2, color3, (d - 0.5) / 0.5);
+
+                        } else if (d < 2.0) {
+
+                            return mix(color3, color4, (d - 1.0) / 1.0);
+
+                        } else {
+
+                            return color4;
+
+                        }
+
+                    }
+
+                   
+
+                    float causticPattern(vec2 p, float t) {
+
+                        float c = 0.0;
+
+                        c += sin(p.x * 1.4 + t * 0.5) * cos(p.y * 1.3 - t * 0.4);
+
+                        c += sin(p.x * 1.9 - t * 0.8) * cos(p.y * 1.7 + t * 0.6);
+
+                        return pow(abs(c * 0.5), 1.2);
+
+                    }
+
+                   
+
+                    void main() {
+
+                        vec3 color = getDepthColor(depth, maxDepth);
+
+                       
+
+                        // Caustics
+
+                        vec2 causticsUV = vPosition.xz * 0.03;
+
+                        float caustics = causticPattern(causticsUV, time);
+
+                        caustics += causticPattern(causticsUV * 1.5, time * 1.3) * 0.5;
+
+                       
+
+                        float causticsIntensity = exp(-depth * 0.3) * 0.3;
+
+                        color += vec3(caustics * causticsIntensity);
+
+                       
+
+                        // Fresnel
+
+                        vec3 viewDir = normalize(vec3(0.0, 1.0, 0.5));
+
+                        float fresnel = pow(1.0 - max(dot(viewDir, vNormal), 0.0), 2.0);
+
+                        color = mix(color, vec3(0.7, 0.8, 0.95), fresnel * 0.25);
+
+                       
+
+                        // Wave highlights
+
+                        float highlight = smoothstep(0.3, 0.7, vElevation) * 0.15;
+
+                        color += vec3(highlight);
+
+                       
+
+                        // Foam
+
+                        float foam = smoothstep(0.5, 0.8, vElevation);
+
+                        color = mix(color, vec3(0.9, 0.95, 1.0), foam * 0.25);
+
+                       
+
+                        float finalOpacity = opacity * (0.75 + (depth / maxDepth) * 0.25);
+
+                       
+
+                        gl_FragColor = vec4(color, finalOpacity);
+
+                    }
+
+                `,
+
+                transparent: true,
+
+                side: THREE.DoubleSide,
+
+                depthWrite: false
+
+            });
+
+
+
+            const waterMesh = new THREE.Mesh(geometry, waterMaterial);
+
+            waterMesh.position.y = 0;
+
+           
+
+            scene.add(waterMesh);
+
+            waterMeshes.push(waterMesh);
+
+        }
+
+
+
+        function calculateCentroid(coordinates) {
+
+            let sumLng = 0, sumLat = 0;
+
+            coordinates.forEach(coord => {
+
+                sumLng += coord[0];
+
+                sumLat += coord[1];
+
+            });
+
+            return [sumLng / coordinates.length, sumLat / coordinates.length];
+
+        }
+
+        function createDepthLabel(lngLat, depth) {
+
+            const labelElement = document.createElement('div');
+
+            labelElement.className = 'depth-label';
+
+            labelElement.textContent = depth + ' m';
+
+            document.body.appendChild(labelElement);
+
+
+
+            depthLabels.push({
+
+                element: labelElement,
+
+                lngLat: lngLat,
+
+                depth: depth
+
+            });
+
+        }
+
+
+
+        function updateDepthLabels() {
+
+            const zoom = map.getZoom();
+
+           
+
+            // Show labels at zoom level 14 or higher (minimum zoom)
+
+            const showLabels = zoom >= 17;
+
+
+
+            depthLabels.forEach(label => {
+
+                if (showLabels) {
+
+                    // Convert lat/lng to 3D world position
+
+                    const mercator = maptilersdk.MercatorCoordinate.fromLngLat(label.lngLat);
+
+                    const x = (mercator.x - modelTransform.translateX) / modelTransform.scale;
+
+                    const y = (mercator.y - modelTransform.translateY) / modelTransform.scale;
+
+                    const z = label.depth * depthScale;
+
+                   
+
+                    // Create a 3D vector for the label position
+
+                    const vector = new THREE.Vector3(x, z, -y);
+
+                   
+
+                    // Project to screen coordinates
+
+                    vector.project(camera);
+
+                   
+
+                    // Convert to screen pixels
+
+                    const canvas = map.getCanvas();
+
+                    const widthHalf = canvas.width / 2;
+
+                    const heightHalf = canvas.height / 2;
+
+                   
+
+                    const screenX = (vector.x * widthHalf) + widthHalf;
+
+                    const screenY = -(vector.y * heightHalf) + heightHalf;
+
+                   
+
+                    // Only show if in front of camera
+
+                    if (vector.z < 1) {
+
+                        label.element.style.display = 'block';
+
+                        label.element.style.left = screenX + 'px';
+
+                        label.element.style.top = screenY + 'px';
+
+                    } else {
+
+                        label.element.style.display = 'none';
+
+                    }
+
+                } else {
+
+                    label.element.style.display = 'none';
+
+                }
+
+            });
+
+        }
+
+       
+
+        // Fullscreen toggle
+
+        document.getElementById('fullscreenBtn').addEventListener('click', () => {
+
+            if (!document.fullscreenElement) {
+
+                document.documentElement.requestFullscreen();
+
+            } else {
+
+                document.exitFullscreen();
+
+            }
+
+        });
+
+    </script>
+
+</body>
+
+</html>
+
+
+
