@@ -1,217 +1,832 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>360° Flood Panorama – No CORS Issues</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<style>
-    body { margin:0; overflow:hidden; background:#000; }
-    #info { position:absolute; top:15px; left:50%; transform:translateX(-50%); color:#0ff; background:rgba(0,0,0,0.6); padding:10px 20px; border-radius:30px; font-family:Arial; pointer-events:none; z-index:100; }
-    #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.9); color:#0ff; padding:25px 50px; border-radius:15px; font-size:22px; font-family:monospace; z-index:1000; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR 360° Flood Visualization - Delhi NCR</title>
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
+        #map { width: 100%; height: 100%; position: absolute; }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 320px;
+            transition: opacity 0.3s;
+        }
+        
+        #ui h2 {
+            margin: 0 0 15px 0;
+            font-size: 20px;
+            color: #1e40af;
+        }
+        
+        .info {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            background: #e2e8f0;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        
+        .mode-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .mode-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        #vrButton {
+            width: 100%;
+            padding: 15px;
+            margin-top: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        
+        #vrButton:hover { transform: scale(1.05); }
+        #vrButton:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .depth-legend {
+            margin-top: 15px;
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+        }
+        
+        .legend-color {
+            width: 30px;
+            height: 16px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(0,0,0,0.15);
+        }
+        
+        .controls {
+            margin-top: 15px;
+            padding: 12px;
+            background: #e0f2fe;
+            border-radius: 8px;
+            font-size: 12px;
+            border: 1px solid #0ea5e9;
+        }
+        
+        .controls strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #075985;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 30px 50px;
+            border-radius: 12px;
+            font-size: 18px;
+            z-index: 2000;
+            text-align: center;
+        }
+        
+        .loading-bar {
+            width: 300px;
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            margin-top: 15px;
+            overflow: hidden;
+        }
+        
+        .loading-progress {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+        }
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
-  }
-}
-</script>
+        #vr-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+    </style>
 </head>
-
 <body>
-<div id="info">360° Flood View – Drag • VR button for headset</div>
-<div id="loading">Loading 360° scene…</div>
+    <div id="container">
+        <div id="map"></div>
+        <canvas id="vr-canvas"></canvas>
+    </div>
+    
+    <div id="ui">
+        <h2>🌊 VR Flood Experience</h2>
+        <div class="info">
+            <strong>Location:</strong> Delhi NCR<br>
+            <strong>Polygons:</strong> <span id="polygonCount">0</span><br>
+            <strong>Status:</strong> <span id="status">Loading...</span>
+        </div>
+        
+        <div class="mode-selector">
+            <div class="mode-btn active" onclick="switchMode('2d')" id="mode2d">
+                📍 2D Map
+            </div>
+            <div class="mode-btn" onclick="switchMode('360')" id="mode360">
+                🔄 360° View
+            </div>
+        </div>
+        
+        <button id="vrButton" disabled>Initializing VR...</button>
+        
+        <div class="depth-legend">
+            <strong>Water Depth:</strong>
+            <div class="legend-item"><div class="legend-color" style="background:#bbdefb;"></div><span>&lt; 0.5 m</span></div>
+            <div class="legend-item"><div class="legend-color" style="background:#42a5f5;"></div><span>0.5 – 1 m</span></div>
+            <div class="legend-item"><div class="legend-color" style="background:#1976d2;"></div><span>1 – 2 m</span></div>
+            <div class="legend-item"><div class="legend-color" style="background:#0d47a1;"></div><span>&gt; 2 m</span></div>
+        </div>
+        
+        <div class="controls">
+            <strong>360° Controls:</strong>
+            • Move: WASD / Arrow keys<br>
+            • Look: Mouse drag<br>
+            • Up/Down: Space / Shift<br><br>
+            <strong>VR Controls:</strong>
+            • Move: Controller joysticks<br>
+            • Look: Turn your head 360°<br>
+            • Exit: Menu button
+        </div>
+    </div>
+    
+    <div id="loading">
+        <div>Loading flood visualization...</div>
+        <div class="loading-bar"><div class="loading-progress" id="progress"></div></div>
+    </div>
 
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
+    <script>
+        let map, mapScene, mapCamera, mapRenderer;
+        let vrScene, vrCamera, vrRenderer;
+        let waterMeshes = [];
+        let modelTransform;
+        let isVRActive = false;
+        let currentMode = '2d';
+        let floodData = null;
+        
+        // VR movement controls
+        let moveSpeed = 0.15;
+        let keys = {};
+        let mouseDown = false;
+        let mouseX = 0, mouseY = 0;
 
-// Load MapTiler SDK
-const mtScript = document.createElement('script');
-mtScript.src = 'https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js';
-document.head.appendChild(mtScript);
+        const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
+        const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
 
-const css = document.createElement('link');
-css.rel = 'stylesheet';
-css.href = 'https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css';
-document.head.appendChild(css);
+        maptilersdk.config.apiKey = API_KEY;
 
-mtScript.onload = startApp;
+        // MapTiler Custom Layer for 2D mode
+        const customLayer = {
+            id: '3d-model',
+            type: 'custom',
+            renderingMode: '3d',
+           
+            onAdd: function(mapInstance, gl) {
+                this.camera = new THREE.Camera();
+                this.scene = new THREE.Scene();
+                mapCamera = this.camera;
+                mapScene = this.scene;
 
-async function startApp() {
-    const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
-    const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson'; // ← your file here
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+                this.scene.add(ambientLight);
 
-    maptilersdk.config.apiKey = API_KEY;
+                const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight1.position.set(100, 200, 100);
+                this.scene.add(directionalLight1);
 
-    // ────────────────────── Three.js setup ──────────────────────
-    const scene   = new THREE.Scene();
-    const camera  = new THREE.PerspectiveCamera(90, innerWidth/innerHeight, 0.1, 10000);
-    camera.position.y = 20;
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+                directionalLight2.position.set(-100, 100, -100);
+                this.scene.add(directionalLight2);
 
-    const renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setPixelRatio(devicePixelRatio);
-    renderer.setSize(innerWidth, innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: mapInstance.getCanvas(),
+                    context: gl,
+                    antialias: true
+                });
+                mapRenderer = this.renderer;
+                this.renderer.autoClear = false;
+            },
 
-    document.body.appendChild(VRButton.createButton(renderer));
+            render: function(gl, matrix) {
+                const rotationX = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(1, 0, 0),
+                    modelTransform.rotateX
+                );
+                const rotationY = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(0, 1, 0),
+                    modelTransform.rotateY
+                );
+                const rotationZ = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(0, 0, 1),
+                    modelTransform.rotateZ
+                );
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.rotateSpeed = 0.6;
+                const m = new THREE.Matrix4().fromArray(matrix);
+                const l = new THREE.Matrix4()
+                    .makeTranslation(
+                        modelTransform.translateX,
+                        modelTransform.translateY,
+                        modelTransform.translateZ
+                    )
+                    .scale(
+                        new THREE.Vector3(
+                            modelTransform.scale,
+                            -modelTransform.scale,
+                            modelTransform.scale
+                        )
+                    )
+                    .multiply(rotationX)
+                    .multiply(rotationY)
+                    .multiply(rotationZ);
 
-    // ────────────────────── Hidden MapTiler map (CORS-safe style) ──────────────────────
-    const mapDiv = document.createElement('div');
-    mapDiv.style.cssText = 'position:absolute; left:-9999px; width:1024px; height:1024px;';
-    document.body.appendChild(mapDiv);
+                this.camera.projectionMatrix = m.multiply(l);
+               
+                const time = performance.now() * 0.001;
+                waterMeshes.forEach(mesh => {
+                    if (mesh.material.uniforms) {
+                        mesh.material.uniforms.time.value = time;
+                    }
+                });
 
-    const map = new maptilersdk.Map({
-        container: mapDiv,
-        // THIS IS THE IMPORTANT LINE – CORS-enabled style
-        style: `https://api.maptiler.com/maps/streets-v2/style.json?key=${API_KEY}`,
-        center: [77.027, 28.448],
-        zoom: 17.8,
-        pitch: 0,
-        bearing: 0,
-        interactive: false,
-        antialias: true
-    });
-
-    let mapTexture, modelTransform;
-    const waterGroup = new THREE.Group();
-    scene.add(waterGroup);
-
-    map.on('load', () => {
-        // 3D buildings
-        map.addLayer({
-            id: '3d-buildings',
-            source: 'composite',
-            'source-layer': 'building',
-            filter: ['==', 'extrude', 'true'],
-            type: 'fill-extrusion',
-            paint: {
-                'fill-extrusion-color': '#bbbbbb',
-                'fill-extrusion-height': ['get', 'height'],
-                'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
-                'fill-extrusion-opacity': 0.9
+                this.renderer.resetState();
+                this.renderer.render(this.scene, this.camera);
+                mapInstance.triggerRepaint();
             }
-        });
-
-        const origin = maptilersdk.MercatorCoordinate.fromLngLat([77.027, 28.448], 0);
-        modelTransform = {
-            translateX: origin.x,
-            translateY: origin.y,
-            translateZ: origin.z || 0,
-            scale: origin.meterInMercatorCoordinateUnits()
         };
 
-        // Live skybox from the hidden map
-        mapTexture = new THREE.CanvasTexture(map.getCanvas());
+        // Initialize map
+        map = new maptilersdk.Map({
+            container: 'map',
+            style: maptilersdk.MapStyle.STREETS,
+            center: [77.027, 28.448],
+            zoom: 16,
+            pitch: 60,
+            bearing: -20,
+            antialias: true
+        });
 
-        const skyGeo = new THREE.SphereGeometry(9000, 60, 40);
-        skyGeo.scale(-1, 1, 1);
-        const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({
-            map: mapTexture,
-            side: THREE.BackSide,
-            depthWrite: false
-        }));
-        scene.add(sky);
-
-        loadFloodData();
-    });
-
-    // ────────────────────── Flood water ──────────────────────
-    async function loadFloodData() {
-        try {
-            const r = await fetch(GEOJSON_FILE);
-            if (!r.ok) throw new Error('Not found');
-            const data = await r.json();
-            createWater(data);
-            document.getElementById('loading').remove();
-        } catch (e) {
-            console.error(e);
-            document.getElementById('loading').textContent = 'Flood data failed';
-        }
-    }
-
-    function createWater(geojson) {
-        const timeUni = { value: 0 };
-
-        geojson.features.forEach(f => {
-            const depth = parseFloat(f.properties?.value || 0);
-            if (depth <= 0 || f.geometry.type !== 'Polygon') return;
-
-            const shape = new THREE.Shape();
-            f.geometry.coordinates[0].forEach((c, i) => {
-                const mc = maptilersdk.MercatorCoordinate.fromLngLat(c);
-                const x = (mc.x - modelTransform.translateX) / modelTransform.scale;
-                const z = (mc.y - modelTransform.translateY) / modelTransform.scale;
-                i===0 ? shape.moveTo(x,z) : shape.lineTo(x,z);
+        map.on('style.load', function() {
+            map.addLayer({
+                'id': '3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 14,
+                'paint': {
+                    'fill-extrusion-color': '#e0e0e0',
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        14, 0,
+                        14.5, ['get', 'height']
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        14, 0,
+                        14.5, ['get', 'min_height']
+                    ],
+                    'fill-extrusion-opacity': 0.9
+                }
             });
 
-            const geom = new THREE.ShapeGeometry(shape);
-            geom.rotateX(-Math.PI/2);
+            const modelOrigin = [77.027, 28.448];
+            const modelAltitude = 0;
+            const modelRotate = [Math.PI / 2, 0, 0];
 
-            const mat = new THREE.ShaderMaterial({
-                uniforms: { time: timeUni, depth: { value: depth } },
+            const modelAsMercatorCoordinate = maptilersdk.MercatorCoordinate.fromLngLat(
+                modelOrigin,
+                modelAltitude
+            );
+
+            modelTransform = {
+                translateX: modelAsMercatorCoordinate.x,
+                translateY: modelAsMercatorCoordinate.y,
+                translateZ: modelAsMercatorCoordinate.z,
+                rotateX: modelRotate[0],
+                rotateY: modelRotate[1],
+                rotateZ: modelRotate[2],
+                scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
+            };
+
+            map.addLayer(customLayer);
+            loadFloodData();
+        });
+
+        // Initialize 360° VR scene
+        function init360Scene() {
+            vrScene = new THREE.Scene();
+            vrScene.background = new THREE.Color(0x87ceeb);
+            vrScene.fog = new THREE.Fog(0x87ceeb, 200, 1000);
+            
+            vrCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+            vrCamera.position.set(0, 1.6, 10);
+            
+            const canvas = document.getElementById('vr-canvas');
+            vrRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            vrRenderer.setSize(window.innerWidth, window.innerHeight);
+            vrRenderer.setPixelRatio(window.devicePixelRatio);
+            vrRenderer.xr.enabled = true;
+            
+            // Lighting for VR scene
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            vrScene.add(ambientLight);
+            
+            const sunLight = new THREE.DirectionalLight(0xffffee, 0.8);
+            sunLight.position.set(100, 200, 100);
+            vrScene.add(sunLight);
+            
+            const fillLight = new THREE.DirectionalLight(0x9fc5e8, 0.3);
+            fillLight.position.set(-100, 50, -100);
+            vrScene.add(fillLight);
+            
+            // Ground plane
+            const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
+            const groundMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xa89f94,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = 0;
+            vrScene.add(ground);
+            
+            setupDesktopControls();
+            setupVRButton();
+            
+            if (floodData) {
+                createWaterLayer360(floodData);
+            }
+        }
+
+        function setupDesktopControls() {
+            window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+            window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+            
+            const canvas = document.getElementById('vr-canvas');
+            canvas.addEventListener('mousedown', (e) => {
+                mouseDown = true;
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+            
+            window.addEventListener('mouseup', () => { mouseDown = false; });
+            
+            window.addEventListener('mousemove', (e) => {
+                if (!mouseDown || isVRActive || currentMode !== '360') return;
+                
+                const deltaX = e.clientX - mouseX;
+                const deltaY = e.clientY - mouseY;
+                
+                vrCamera.rotation.y -= deltaX * 0.002;
+                vrCamera.rotation.x -= deltaY * 0.002;
+                vrCamera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, vrCamera.rotation.x));
+                
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+        }
+
+        function updateMovement() {
+            if (isVRActive || currentMode !== '360') return;
+            
+            const direction = new THREE.Vector3();
+            
+            if (keys['w'] || keys['arrowup']) direction.z -= moveSpeed;
+            if (keys['s'] || keys['arrowdown']) direction.z += moveSpeed;
+            if (keys['a'] || keys['arrowleft']) direction.x -= moveSpeed;
+            if (keys['d'] || keys['arrowright']) direction.x += moveSpeed;
+            if (keys[' ']) vrCamera.position.y += moveSpeed;
+            if (keys['shift']) vrCamera.position.y -= moveSpeed;
+            
+            direction.applyEuler(new THREE.Euler(0, vrCamera.rotation.y, 0));
+            vrCamera.position.add(direction);
+            vrCamera.position.y = Math.max(0.5, vrCamera.position.y);
+        }
+
+        function setupVRButton() {
+            const vrButton = document.getElementById('vrButton');
+            
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    if (supported) {
+                        vrButton.disabled = false;
+                        vrButton.textContent = 'Enter VR';
+                        vrButton.onclick = toggleVR;
+                        updateStatus('VR Ready');
+                    } else {
+                        vrButton.textContent = 'VR Not Supported';
+                        updateStatus('Desktop mode available');
+                    }
+                });
+            } else {
+                vrButton.textContent = 'WebXR Not Available';
+                updateStatus('Use desktop controls');
+            }
+        }
+
+        function toggleVR() {
+            if (currentMode !== '360') {
+                alert('Please switch to 360° View mode to use VR');
+                return;
+            }
+            
+            if (!isVRActive) {
+                navigator.xr.requestSession('immersive-vr', {
+                    optionalFeatures: ['local-floor', 'bounded-floor']
+                }).then(onSessionStarted).catch(err => {
+                    console.error('VR Session failed:', err);
+                    alert('Could not start VR session. Make sure you have a VR headset connected.');
+                });
+            }
+        }
+
+        function onSessionStarted(session) {
+            session.addEventListener('end', onSessionEnded);
+            vrRenderer.xr.setSession(session);
+            isVRActive = true;
+            document.getElementById('vrButton').textContent = 'Exit VR (Menu)';
+            document.getElementById('ui').style.opacity = '0.3';
+            updateStatus('VR Active - Look around 360°!');
+        }
+
+        function onSessionEnded() {
+            isVRActive = false;
+            document.getElementById('vrButton').textContent = 'Enter VR';
+            document.getElementById('ui').style.opacity = '1';
+            updateStatus('VR Ready');
+        }
+
+        async function loadFloodData() {
+            try {
+                updateProgress(50);
+                const res = await fetch(GEOJSON_FILE);
+                if (!res.ok) throw new Error('File not found');
+                
+                const data = await res.json();
+                floodData = data;
+                
+                updateProgress(80);
+                createWaterLayer(data);
+                updateProgress(100);
+                
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                }, 500);
+                
+                updateStatus('Ready - Switch modes to explore');
+            } catch (err) {
+                console.error('Error loading flood data:', err);
+                document.getElementById('loading').innerHTML = 
+                    '<div>⚠️ Error loading flood data</div><div style="font-size:14px; margin-top:10px;">Place gridded_30m_T1_flood_only.geojson in same folder</div>';
+                updateStatus('Error loading data');
+                
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        function createWaterLayer(geojsonData) {
+            if (!mapScene) return;
+
+            waterMeshes.forEach(mesh => {
+                mapScene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            });
+            waterMeshes = [];
+
+            if (geojsonData.type !== 'FeatureCollection') return;
+
+            let polygonCount = 0;
+            let maxDepth = 0;
+
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+               
+                const depth = parseFloat(feature.properties.value);
+                if (isNaN(depth) || depth <= 0) return;
+
+                maxDepth = Math.max(maxDepth, depth);
+
+                if (feature.geometry.type === 'Polygon') {
+                    const coords = feature.geometry.coordinates[0];
+                    createPolygonWater(coords, depth, maxDepth, mapScene);
+                    polygonCount++;
+                }
+            });
+
+            document.getElementById('polygonCount').textContent = polygonCount;
+            console.log(`Loaded ${polygonCount} water polygons. Max depth: ${maxDepth}m`);
+        }
+
+        function createWaterLayer360(geojsonData) {
+            if (!vrScene) return;
+
+            if (geojsonData.type !== 'FeatureCollection') return;
+
+            let maxDepth = 0;
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+                const depth = parseFloat(feature.properties.value);
+                if (!isNaN(depth) && depth > 0) {
+                    maxDepth = Math.max(maxDepth, depth);
+                }
+            });
+
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+               
+                const depth = parseFloat(feature.properties.value);
+                if (isNaN(depth) || depth <= 0) return;
+
+                if (feature.geometry.type === 'Polygon') {
+                    const coords = feature.geometry.coordinates[0];
+                    createPolygonWater360(coords, depth, maxDepth);
+                }
+            });
+        }
+
+        function createPolygonWater(coordinates, depth, maxDepth, targetScene) {
+            const points = [];
+            coordinates.forEach(coord => {
+                const mercator = maptilersdk.MercatorCoordinate.fromLngLat([coord[0], coord[1]]);
+                const x = (mercator.x - modelTransform.translateX) / modelTransform.scale;
+                const y = (mercator.y - modelTransform.translateY) / modelTransform.scale;
+                points.push(new THREE.Vector2(x, y));
+            });
+
+            if (points.length < 3) return;
+
+            const shape = new THREE.Shape(points);
+            const geometry = new THREE.ShapeGeometry(shape, 24);
+            geometry.rotateX(-Math.PI / 2);
+
+            const waterMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    depth: { value: depth },
+                    maxDepth: { value: maxDepth }
+                },
                 vertexShader: `
                     uniform float time;
+                    uniform float depth;
+                    varying vec2 vUv;
+                    varying vec3 vPosition;
+                    varying float vElevation;
+                   
                     void main() {
-                        vec3 p = position;
-                        float wave = sin(p.x*12.+time*3.)*0.04 + sin(p.z*15.-time*2.5)*0.03;
-                        p.y += wave;
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
+                        vUv = uv;
+                        vPosition = position;
+                        vec3 pos = position;
+                       
+                        float wave = 0.0;
+                        wave += sin(pos.x * 0.008 + time * 0.5) * 0.8;
+                        wave += sin(pos.z * 0.01 - time * 0.4) * 0.6;
+                        wave += sin(pos.x * 0.015 + pos.z * 0.012 + time * 0.8) * 0.5;
+                       
+                        vElevation = wave;
+                        pos.y = depth + wave;
+                       
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
                     }
                 `,
                 fragmentShader: `
+                    uniform float time;
                     uniform float depth;
-                    vec3 col(float d){
-                        if(d<0.5)return vec3(0.73,0.87,0.98);
-                        if(d<1.0)return vec3(0.26,0.65,0.96);
-                        if(d<2.0)return vec3(0.10,0.46,0.82);
-                        return vec3(0.05,0.28,0.63);
+                    uniform float maxDepth;
+                    varying vec2 vUv;
+                    varying vec3 vPosition;
+                    varying float vElevation;
+                   
+                    vec3 getDepthColor(float d) {
+                        if (d < 0.5) return vec3(0.73, 0.87, 0.98);
+                        else if (d < 1.0) return vec3(0.26, 0.65, 0.96);
+                        else if (d < 2.0) return vec3(0.10, 0.46, 0.82);
+                        else return vec3(0.05, 0.28, 0.63);
                     }
-                    void main(){
-                        gl_FragColor = vec4(col(depth), 0.82);
+                   
+                    void main() {
+                        vec3 color = getDepthColor(depth);
+                        float caustics = sin(vPosition.x * 2.0 + time) * cos(vPosition.z * 2.0 - time);
+                        color += vec3(pow(abs(caustics), 0.8) * 0.2);
+                        float highlight = smoothstep(0.3, 0.7, vElevation) * 0.15;
+                        color += vec3(highlight);
+                        gl_FragColor = vec4(color, 0.75);
                     }
                 `,
                 transparent: true,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthWrite: false
             });
 
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.position.y = depth;
-            waterGroup.add(mesh);
+            const waterMesh = new THREE.Mesh(geometry, waterMaterial);
+            waterMesh.position.y = 0;
+            targetScene.add(waterMesh);
+            waterMeshes.push(waterMesh);
+        }
+
+        function createPolygonWater360(coordinates, depth, maxDepth) {
+            const CENTER_LAT = 28.448;
+            const CENTER_LNG = 77.027;
+            const METERS_PER_DEGREE_LAT = 111320;
+            const METERS_PER_DEGREE_LNG = METERS_PER_DEGREE_LAT * Math.cos(CENTER_LAT * Math.PI / 180);
+
+            const points = coordinates.map(coord => {
+                const x = (coord[0] - CENTER_LNG) * METERS_PER_DEGREE_LNG;
+                const z = -(coord[1] - CENTER_LAT) * METERS_PER_DEGREE_LAT;
+                return new THREE.Vector2(x, z);
+            });
+
+            if (points.length < 3) return;
+
+            const shape = new THREE.Shape(points);
+            const geometry = new THREE.ShapeGeometry(shape, 16);
+            geometry.rotateX(-Math.PI / 2);
+
+            const waterMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    depth: { value: depth },
+                    maxDepth: { value: maxDepth }
+                },
+                vertexShader: `
+                    uniform float time;
+                    uniform float depth;
+                    varying vec2 vUv;
+                    varying vec3 vPos;
+                    varying float vWave;
+                    
+                    void main() {
+                        vUv = uv;
+                        vPos = position;
+                        vec3 pos = position;
+                        float wave = sin(pos.x * 0.1 + time) * 0.02 +
+                                   sin(pos.z * 0.15 - time * 0.8) * 0.015;
+                        vWave = wave;
+                        pos.y = depth * 0.5 + wave;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float time;
+                    uniform float depth;
+                    uniform float maxDepth;
+                    varying vec3 vPos;
+                    varying float vWave;
+                    
+                    vec3 getDepthColor(float d) {
+                        if (d < 0.5) return vec3(0.73, 0.87, 0.98);
+                        else if (d < 1.0) return vec3(0.26, 0.65, 0.96);
+                        else if (d < 2.0) return vec3(0.10, 0.46, 0.82);
+                        else return vec3(0.05, 0.28, 0.63);
+                    }
+                    
+                    void main() {
+                        vec3 color = getDepthColor(depth);
+                        float caustics = sin(vPos.x * 2.0 + time) * cos(vPos.z * 2.0 - time);
+                        color += vec3(pow(abs(caustics), 0.8) * 0.15);
+                        gl_FragColor = vec4(color, 0.7);
+                    }
+                `,
+                transparent: true,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+
+            const waterMesh = new THREE.Mesh(geometry, waterMaterial);
+            waterMesh.position.y = 0.05;
+            vrScene.add(waterMesh);
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            
+            document.getElementById('mode2d').classList.toggle('active', mode === '2d');
+            document.getElementById('mode360').classList.toggle('active', mode === '360');
+            
+            if (mode === '2d') {
+                document.getElementById('map').style.display = 'block';
+                document.getElementById('vr-canvas').style.display = 'none';
+                updateStatus('2D Map View');
+                
+                if (map) {
+                    map.resize();
+                    map.triggerRepaint();
+                }
+            } else {
+                document.getElementById('map').style.display = 'none';
+                document.getElementById('vr-canvas').style.display = 'block';
+                updateStatus('360° Immersive View');
+                
+                if (!vrScene) {
+                    init360Scene();
+                }
+                
+                if (vrRenderer) {
+                    vrRenderer.setAnimationLoop(animate360);
+                }
+            }
+        }
+
+        function animate360() {
+            const time = performance.now() * 0.001;
+            
+            updateMovement();
+            
+            if (vrScene) {
+                vrScene.traverse((child) => {
+                    if (child.isMesh && child.material.uniforms && child.material.uniforms.time) {
+                        child.material.uniforms.time.value = time;
+                    }
+                });
+            }
+            
+            if (vrRenderer && vrCamera && vrScene) {
+                vrRenderer.render(vrScene, vrCamera);
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (map) map.resize();
+            
+            if (vrCamera && vrRenderer) {
+                vrCamera.aspect = window.innerWidth / window.innerHeight;
+                vrCamera.updateProjectionMatrix();
+                vrRenderer.setSize(window.innerWidth, window.innerHeight);
+            }
         });
-    }
 
-    // ────────────────────── Animation ──────────────────────
-    function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
-        if (mapTexture) mapTexture.needsUpdate = true;
+        function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
 
-        const t = performance.now() * 0.001;
-        waterGroup.children.forEach(m => {
-            if (m.material.uniforms?.time) m.material.uniforms.time.value = t;
-        });
-
-        renderer.render(scene, camera);
-    }
-
-    window.addEventListener('resize', () => {
-        camera.aspect = innerWidth/innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(innerWidth, innerHeight);
-    });
-
-    animate();
-}
-</script>
+        function updateProgress(percent) {
+            document.getElementById('progress').style.width = percent + '%';
+        }
+    </script>
 </body>
 </html>
