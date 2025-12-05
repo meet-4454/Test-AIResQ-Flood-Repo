@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Flood Visualization - Delhi NCR</title>
+    <title>VR 360° Flood Visualization - Delhi NCR</title>
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body { margin: 0; padding: 0; overflow: hidden; font-family: Arial, sans-serif; }
-        #container { width: 100vw; height: 100vh; }
+        #container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
+        #map { width: 100%; height: 100%; position: absolute; }
         
         #ui {
             position: absolute;
@@ -19,6 +22,7 @@
             box-shadow: 0 8px 32px rgba(0,0,0,0.2);
             z-index: 1000;
             max-width: 320px;
+            transition: opacity 0.3s;
         }
         
         #ui h2 {
@@ -31,6 +35,35 @@
             margin: 10px 0;
             font-size: 14px;
             color: #333;
+        }
+        
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            background: #e2e8f0;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        
+        .mode-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .mode-btn:hover {
+            transform: scale(1.05);
         }
         
         #vrButton {
@@ -119,17 +152,38 @@
             width: 0%;
             transition: width 0.3s;
         }
+
+        #vr-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <div id="container"></div>
+    <div id="container">
+        <div id="map"></div>
+        <canvas id="vr-canvas"></canvas>
+    </div>
     
     <div id="ui">
         <h2>🌊 VR Flood Experience</h2>
         <div class="info">
             <strong>Location:</strong> Delhi NCR<br>
-            <strong>Buildings:</strong> <span id="buildingCount">0</span><br>
+            <strong>Polygons:</strong> <span id="polygonCount">0</span><br>
             <strong>Status:</strong> <span id="status">Loading...</span>
+        </div>
+        
+        <div class="mode-selector">
+            <div class="mode-btn active" onclick="switchMode('2d')" id="mode2d">
+                📍 2D Map
+            </div>
+            <div class="mode-btn" onclick="switchMode('360')" id="mode360">
+                🔄 360° View
+            </div>
         </div>
         
         <button id="vrButton" disabled>Initializing VR...</button>
@@ -143,82 +197,211 @@
         </div>
         
         <div class="controls">
-            <strong>Desktop Controls:</strong>
+            <strong>360° Controls:</strong>
             • Move: WASD / Arrow keys<br>
             • Look: Mouse drag<br>
             • Up/Down: Space / Shift<br><br>
             <strong>VR Controls:</strong>
             • Move: Controller joysticks<br>
-            • Look: Turn your head<br>
+            • Look: Turn your head 360°<br>
             • Exit: Menu button
         </div>
     </div>
     
     <div id="loading">
-        <div>Loading 3D environment...</div>
+        <div>Loading flood visualization...</div>
         <div class="loading-bar"><div class="loading-progress" id="progress"></div></div>
     </div>
 
     <script>
-        let scene, camera, renderer, controls;
+        let map, mapScene, mapCamera, mapRenderer;
+        let vrScene, vrCamera, vrRenderer;
         let waterMeshes = [];
-        let buildings = [];
+        let modelTransform;
         let isVRActive = false;
-        let moveSpeed = 0.1;
+        let currentMode = '2d';
+        let floodData = null;
+        
+        // VR movement controls
+        let moveSpeed = 0.15;
         let keys = {};
         let mouseDown = false;
         let mouseX = 0, mouseY = 0;
-        
-        const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
-        
-        // Reference coordinates for Delhi NCR
-        const REFERENCE_LAT = 28.448;
-        const REFERENCE_LNG = 77.027;
-        
-        // Scale factor for converting lat/lng to meters
-        const METERS_PER_DEGREE_LAT = 111320;
-        const METERS_PER_DEGREE_LNG = METERS_PER_DEGREE_LAT * Math.cos(REFERENCE_LAT * Math.PI / 180);
 
-        function init() {
-            // Scene setup
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb); // Sky blue
-            scene.fog = new THREE.Fog(0x87ceeb, 100, 800);
+        const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
+        const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
+
+        maptilersdk.config.apiKey = API_KEY;
+
+        // MapTiler Custom Layer for 2D mode
+        const customLayer = {
+            id: '3d-model',
+            type: 'custom',
+            renderingMode: '3d',
+           
+            onAdd: function(mapInstance, gl) {
+                this.camera = new THREE.Camera();
+                this.scene = new THREE.Scene();
+                mapCamera = this.camera;
+                mapScene = this.scene;
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+                this.scene.add(ambientLight);
+
+                const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight1.position.set(100, 200, 100);
+                this.scene.add(directionalLight1);
+
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+                directionalLight2.position.set(-100, 100, -100);
+                this.scene.add(directionalLight2);
+
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: mapInstance.getCanvas(),
+                    context: gl,
+                    antialias: true
+                });
+                mapRenderer = this.renderer;
+                this.renderer.autoClear = false;
+            },
+
+            render: function(gl, matrix) {
+                const rotationX = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(1, 0, 0),
+                    modelTransform.rotateX
+                );
+                const rotationY = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(0, 1, 0),
+                    modelTransform.rotateY
+                );
+                const rotationZ = new THREE.Matrix4().makeRotationAxis(
+                    new THREE.Vector3(0, 0, 1),
+                    modelTransform.rotateZ
+                );
+
+                const m = new THREE.Matrix4().fromArray(matrix);
+                const l = new THREE.Matrix4()
+                    .makeTranslation(
+                        modelTransform.translateX,
+                        modelTransform.translateY,
+                        modelTransform.translateZ
+                    )
+                    .scale(
+                        new THREE.Vector3(
+                            modelTransform.scale,
+                            -modelTransform.scale,
+                            modelTransform.scale
+                        )
+                    )
+                    .multiply(rotationX)
+                    .multiply(rotationY)
+                    .multiply(rotationZ);
+
+                this.camera.projectionMatrix = m.multiply(l);
+               
+                const time = performance.now() * 0.001;
+                waterMeshes.forEach(mesh => {
+                    if (mesh.material.uniforms) {
+                        mesh.material.uniforms.time.value = time;
+                    }
+                });
+
+                this.renderer.resetState();
+                this.renderer.render(this.scene, this.camera);
+                mapInstance.triggerRepaint();
+            }
+        };
+
+        // Initialize map
+        map = new maptilersdk.Map({
+            container: 'map',
+            style: maptilersdk.MapStyle.STREETS,
+            center: [77.027, 28.448],
+            zoom: 16,
+            pitch: 60,
+            bearing: -20,
+            antialias: true
+        });
+
+        map.on('style.load', function() {
+            map.addLayer({
+                'id': '3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 14,
+                'paint': {
+                    'fill-extrusion-color': '#e0e0e0',
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        14, 0,
+                        14.5, ['get', 'height']
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        14, 0,
+                        14.5, ['get', 'min_height']
+                    ],
+                    'fill-extrusion-opacity': 0.9
+                }
+            });
+
+            const modelOrigin = [77.027, 28.448];
+            const modelAltitude = 0;
+            const modelRotate = [Math.PI / 2, 0, 0];
+
+            const modelAsMercatorCoordinate = maptilersdk.MercatorCoordinate.fromLngLat(
+                modelOrigin,
+                modelAltitude
+            );
+
+            modelTransform = {
+                translateX: modelAsMercatorCoordinate.x,
+                translateY: modelAsMercatorCoordinate.y,
+                translateZ: modelAsMercatorCoordinate.z,
+                rotateX: modelRotate[0],
+                rotateY: modelRotate[1],
+                rotateZ: modelRotate[2],
+                scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
+            };
+
+            map.addLayer(customLayer);
+            loadFloodData();
+        });
+
+        // Initialize 360° VR scene
+        function init360Scene() {
+            vrScene = new THREE.Scene();
+            vrScene.background = new THREE.Color(0x87ceeb);
+            vrScene.fog = new THREE.Fog(0x87ceeb, 200, 1000);
             
-            // Camera setup (eye level - 1.6m height)
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(0, 1.6, 5);
+            vrCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+            vrCamera.position.set(0, 1.6, 10);
             
-            // Renderer setup
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.xr.enabled = true;
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            document.getElementById('container').appendChild(renderer.domElement);
+            const canvas = document.getElementById('vr-canvas');
+            vrRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            vrRenderer.setSize(window.innerWidth, window.innerHeight);
+            vrRenderer.setPixelRatio(window.devicePixelRatio);
+            vrRenderer.xr.enabled = true;
             
-            // Lighting - realistic outdoor lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
+            // Lighting for VR scene
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            vrScene.add(ambientLight);
             
-            const sunLight = new THREE.DirectionalLight(0xffffee, 1.2);
+            const sunLight = new THREE.DirectionalLight(0xffffee, 0.8);
             sunLight.position.set(100, 200, 100);
-            sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 2048;
-            sunLight.shadow.mapSize.height = 2048;
-            sunLight.shadow.camera.far = 500;
-            sunLight.shadow.camera.left = -200;
-            sunLight.shadow.camera.right = 200;
-            sunLight.shadow.camera.top = 200;
-            sunLight.shadow.camera.bottom = -200;
-            scene.add(sunLight);
+            vrScene.add(sunLight);
             
             const fillLight = new THREE.DirectionalLight(0x9fc5e8, 0.3);
             fillLight.position.set(-100, 50, -100);
-            scene.add(fillLight);
+            vrScene.add(fillLight);
             
-            // Ground plane (streets/ground level)
+            // Ground plane
             const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
             const groundMaterial = new THREE.MeshStandardMaterial({ 
                 color: 0xa89f94,
@@ -228,145 +411,22 @@
             const ground = new THREE.Mesh(groundGeometry, groundMaterial);
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = 0;
-            ground.receiveShadow = true;
-            scene.add(ground);
+            vrScene.add(ground);
             
-            // Add some texture to ground with road-like grid
-            const roadMaterial = new THREE.MeshStandardMaterial({ 
-                color: 0x4a4a4a,
-                roughness: 0.8
-            });
-            
-            // Create grid of roads
-            for (let i = -500; i <= 500; i += 50) {
-                const roadH = new THREE.Mesh(
-                    new THREE.PlaneGeometry(2000, 8),
-                    roadMaterial
-                );
-                roadH.rotation.x = -Math.PI / 2;
-                roadH.position.set(0, 0.01, i);
-                roadH.receiveShadow = true;
-                scene.add(roadH);
-                
-                const roadV = new THREE.Mesh(
-                    new THREE.PlaneGeometry(8, 2000),
-                    roadMaterial
-                );
-                roadV.rotation.x = -Math.PI / 2;
-                roadV.position.set(i, 0.01, 0);
-                roadV.receiveShadow = true;
-                scene.add(roadV);
-            }
-            
-            // Generate procedural buildings based on the area
-            generateBuildings();
-            
-            // VR Button setup
+            setupDesktopControls();
             setupVRButton();
             
-            // Desktop controls
-            setupDesktopControls();
-            
-            // Load flood data
-            loadFloodData();
-            
-            // Handle window resize
-            window.addEventListener('resize', onWindowResize);
-            
-            // Start animation loop
-            renderer.setAnimationLoop(animate);
+            if (floodData) {
+                createWaterLayer360(floodData);
+            }
         }
-        
-        function generateBuildings() {
-            // Create diverse buildings around the area
-            const buildingConfigs = [
-                // Hospitals (taller, more prominent)
-                { x: 80, z: 120, w: 40, d: 30, h: 25, color: 0xffffff, name: 'Hospital' },
-                { x: -90, z: 150, w: 35, d: 35, h: 22, color: 0xffffff, name: 'Hospital' },
-                
-                // Commercial/Office buildings
-                { x: 50, z: 50, w: 25, d: 25, h: 35, color: 0xdedede },
-                { x: -60, z: 60, w: 30, d: 20, h: 28, color: 0xc8c8c8 },
-                { x: 100, z: -40, w: 28, d: 28, h: 32, color: 0xd5d5d5 },
-                { x: -80, z: -50, w: 25, d: 30, h: 30, color: 0xcccccc },
-                
-                // Residential buildings (varied heights)
-                { x: 20, z: 80, w: 15, d: 15, h: 18, color: 0xe8d5b7 },
-                { x: -30, z: 90, w: 18, d: 12, h: 15, color: 0xdcc8a6 },
-                { x: 70, z: -80, w: 12, d: 18, h: 20, color: 0xe0d0b0 },
-                { x: -50, z: -70, w: 16, d: 16, h: 16, color: 0xd8c4a0 },
-                { x: 110, z: 20, w: 14, d: 14, h: 22, color: 0xe5d8c0 },
-                { x: -100, z: 10, w: 20, d: 15, h: 19, color: 0xdac5a8 },
-                
-                // Shopping centers / Large structures
-                { x: 30, z: -30, w: 45, d: 35, h: 12, color: 0xb8b8b8 },
-                { x: -70, z: 20, w: 40, d: 30, h: 14, color: 0xc0c0c0 },
-                
-                // Small shops/houses
-                { x: 5, z: 40, w: 10, d: 10, h: 8, color: 0xf0e0d0 },
-                { x: -15, z: 35, w: 8, d: 12, h: 9, color: 0xead8c8 },
-                { x: 40, z: 10, w: 12, d: 8, h: 7, color: 0xf5e5d5 },
-                { x: -40, z: -10, w: 9, d: 9, h: 10, color: 0xe8d8c0 },
-                { x: 65, z: 90, w: 11, d: 11, h: 11, color: 0xecd9c5 },
-                { x: -85, z: 80, w: 10, d: 13, h: 8, color: 0xf0dcc8 }
-            ];
-            
-            buildingConfigs.forEach((config, index) => {
-                const geometry = new THREE.BoxGeometry(config.w, config.h, config.d);
-                const material = new THREE.MeshStandardMaterial({ 
-                    color: config.color,
-                    roughness: 0.7,
-                    metalness: 0.2
-                });
-                
-                const building = new THREE.Mesh(geometry, material);
-                building.position.set(config.x, config.h / 2, config.z);
-                building.castShadow = true;
-                building.receiveShadow = true;
-                scene.add(building);
-                buildings.push(building);
-                
-                // Add windows for taller buildings
-                if (config.h > 15) {
-                    const windowMaterial = new THREE.MeshStandardMaterial({ 
-                        color: 0x4a7c9e,
-                        emissive: 0x1a3c5e,
-                        emissiveIntensity: 0.3
-                    });
-                    
-                    const floors = Math.floor(config.h / 3);
-                    for (let f = 1; f < floors; f++) {
-                        // Front and back windows
-                        for (let w = -config.w/2 + 3; w < config.w/2 - 2; w += 4) {
-                            const windowF = new THREE.Mesh(
-                                new THREE.BoxGeometry(2, 2, 0.2),
-                                windowMaterial
-                            );
-                            windowF.position.set(config.x + w, f * 3, config.z + config.d/2);
-                            scene.add(windowF);
-                            
-                            const windowB = new THREE.Mesh(
-                                new THREE.BoxGeometry(2, 2, 0.2),
-                                windowMaterial
-                            );
-                            windowB.position.set(config.x + w, f * 3, config.z - config.d/2);
-                            scene.add(windowB);
-                        }
-                    }
-                }
-            });
-            
-            document.getElementById('buildingCount').textContent = buildings.length;
-            updateProgress(33);
-        }
-        
+
         function setupDesktopControls() {
-            // Keyboard controls
             window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
             window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
             
-            // Mouse controls for looking around
-            renderer.domElement.addEventListener('mousedown', (e) => {
+            const canvas = document.getElementById('vr-canvas');
+            canvas.addEventListener('mousedown', (e) => {
                 mouseDown = true;
                 mouseX = e.clientX;
                 mouseY = e.clientY;
@@ -375,57 +435,37 @@
             window.addEventListener('mouseup', () => { mouseDown = false; });
             
             window.addEventListener('mousemove', (e) => {
-                if (!mouseDown || isVRActive) return;
+                if (!mouseDown || isVRActive || currentMode !== '360') return;
                 
                 const deltaX = e.clientX - mouseX;
                 const deltaY = e.clientY - mouseY;
                 
-                camera.rotation.y -= deltaX * 0.002;
-                camera.rotation.x -= deltaY * 0.002;
-                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                vrCamera.rotation.y -= deltaX * 0.002;
+                vrCamera.rotation.x -= deltaY * 0.002;
+                vrCamera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, vrCamera.rotation.x));
                 
                 mouseX = e.clientX;
                 mouseY = e.clientY;
             });
         }
-        
+
         function updateMovement() {
-            if (isVRActive) return;
+            if (isVRActive || currentMode !== '360') return;
             
             const direction = new THREE.Vector3();
             
-            // Forward/backward
-            if (keys['w'] || keys['arrowup']) {
-                direction.z -= moveSpeed;
-            }
-            if (keys['s'] || keys['arrowdown']) {
-                direction.z += moveSpeed;
-            }
+            if (keys['w'] || keys['arrowup']) direction.z -= moveSpeed;
+            if (keys['s'] || keys['arrowdown']) direction.z += moveSpeed;
+            if (keys['a'] || keys['arrowleft']) direction.x -= moveSpeed;
+            if (keys['d'] || keys['arrowright']) direction.x += moveSpeed;
+            if (keys[' ']) vrCamera.position.y += moveSpeed;
+            if (keys['shift']) vrCamera.position.y -= moveSpeed;
             
-            // Left/right
-            if (keys['a'] || keys['arrowleft']) {
-                direction.x -= moveSpeed;
-            }
-            if (keys['d'] || keys['arrowright']) {
-                direction.x += moveSpeed;
-            }
-            
-            // Up/down
-            if (keys[' ']) {
-                camera.position.y += moveSpeed;
-            }
-            if (keys['shift']) {
-                camera.position.y -= moveSpeed;
-            }
-            
-            // Apply camera rotation to movement
-            direction.applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-            camera.position.add(direction);
-            
-            // Keep above ground
-            camera.position.y = Math.max(0.5, camera.position.y);
+            direction.applyEuler(new THREE.Euler(0, vrCamera.rotation.y, 0));
+            vrCamera.position.add(direction);
+            vrCamera.position.y = Math.max(0.5, vrCamera.position.y);
         }
-        
+
         function setupVRButton() {
             const vrButton = document.getElementById('vrButton');
             
@@ -438,110 +478,179 @@
                         updateStatus('VR Ready');
                     } else {
                         vrButton.textContent = 'VR Not Supported';
-                        updateStatus('VR not available');
+                        updateStatus('Desktop mode available');
                     }
                 });
             } else {
                 vrButton.textContent = 'WebXR Not Available';
-                updateStatus('Use Desktop Controls');
+                updateStatus('Use desktop controls');
             }
         }
-        
+
         function toggleVR() {
+            if (currentMode !== '360') {
+                alert('Please switch to 360° View mode to use VR');
+                return;
+            }
+            
             if (!isVRActive) {
-                renderer.xr.getSession() ? 
-                    renderer.xr.getSession().end() :
-                    navigator.xr.requestSession('immersive-vr', {
-                        optionalFeatures: ['local-floor', 'bounded-floor']
-                    }).then(onSessionStarted);
+                navigator.xr.requestSession('immersive-vr', {
+                    optionalFeatures: ['local-floor', 'bounded-floor']
+                }).then(onSessionStarted).catch(err => {
+                    console.error('VR Session failed:', err);
+                    alert('Could not start VR session. Make sure you have a VR headset connected.');
+                });
             }
         }
-        
+
         function onSessionStarted(session) {
             session.addEventListener('end', onSessionEnded);
-            renderer.xr.setSession(session);
+            vrRenderer.xr.setSession(session);
             isVRActive = true;
-            document.getElementById('vrButton').textContent = 'Exit VR';
-            document.getElementById('ui').style.display = 'none';
-            updateStatus('VR Active');
+            document.getElementById('vrButton').textContent = 'Exit VR (Menu)';
+            document.getElementById('ui').style.opacity = '0.3';
+            updateStatus('VR Active - Look around 360°!');
         }
-        
+
         function onSessionEnded() {
             isVRActive = false;
             document.getElementById('vrButton').textContent = 'Enter VR';
-            document.getElementById('ui').style.display = 'block';
+            document.getElementById('ui').style.opacity = '1';
             updateStatus('VR Ready');
         }
-        
+
         async function loadFloodData() {
             try {
                 updateProgress(50);
-                const response = await fetch(GEOJSON_FILE);
-                if (!response.ok) {
-                    throw new Error('Could not load flood data file');
-                }
-                const data = await response.json();
-                updateProgress(70);
-                createWaterFromGeoJSON(data);
+                const res = await fetch(GEOJSON_FILE);
+                if (!res.ok) throw new Error('File not found');
+                
+                const data = await res.json();
+                floodData = data;
+                
+                updateProgress(80);
+                createWaterLayer(data);
                 updateProgress(100);
                 
                 setTimeout(() => {
                     document.getElementById('loading').style.display = 'none';
                 }, 500);
                 
-                updateStatus('Ready - Press WASD to move');
-            } catch (error) {
-                console.error('Error loading flood data:', error);
+                updateStatus('Ready - Switch modes to explore');
+            } catch (err) {
+                console.error('Error loading flood data:', err);
                 document.getElementById('loading').innerHTML = 
                     '<div>⚠️ Error loading flood data</div><div style="font-size:14px; margin-top:10px;">Place gridded_30m_T1_flood_only.geojson in same folder</div>';
-                updateStatus('Error - Using demo mode');
+                updateStatus('Error loading data');
                 
-                // Create demo water for visualization
-                createDemoWater();
                 setTimeout(() => {
                     document.getElementById('loading').style.display = 'none';
-                }, 2000);
+                }, 3000);
             }
         }
-        
-        function createDemoWater() {
-            // Create sample water areas if file not found
-            const demoAreas = [
-                { x: 0, z: 0, w: 80, d: 60, depth: 0.8 },
-                { x: 50, z: 60, w: 50, d: 40, depth: 1.2 },
-                { x: -60, z: 50, w: 45, d: 50, depth: 0.6 }
-            ];
-            
-            demoAreas.forEach(area => {
-                createSimpleWater(area.x, area.z, area.w, area.d, area.depth);
+
+        function createWaterLayer(geojsonData) {
+            if (!mapScene) return;
+
+            waterMeshes.forEach(mesh => {
+                mapScene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            });
+            waterMeshes = [];
+
+            if (geojsonData.type !== 'FeatureCollection') return;
+
+            let polygonCount = 0;
+            let maxDepth = 0;
+
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+               
+                const depth = parseFloat(feature.properties.value);
+                if (isNaN(depth) || depth <= 0) return;
+
+                maxDepth = Math.max(maxDepth, depth);
+
+                if (feature.geometry.type === 'Polygon') {
+                    const coords = feature.geometry.coordinates[0];
+                    createPolygonWater(coords, depth, maxDepth, mapScene);
+                    polygonCount++;
+                }
+            });
+
+            document.getElementById('polygonCount').textContent = polygonCount;
+            console.log(`Loaded ${polygonCount} water polygons. Max depth: ${maxDepth}m`);
+        }
+
+        function createWaterLayer360(geojsonData) {
+            if (!vrScene) return;
+
+            if (geojsonData.type !== 'FeatureCollection') return;
+
+            let maxDepth = 0;
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+                const depth = parseFloat(feature.properties.value);
+                if (!isNaN(depth) && depth > 0) {
+                    maxDepth = Math.max(maxDepth, depth);
+                }
+            });
+
+            geojsonData.features.forEach(feature => {
+                if (!feature.geometry || !feature.properties) return;
+               
+                const depth = parseFloat(feature.properties.value);
+                if (isNaN(depth) || depth <= 0) return;
+
+                if (feature.geometry.type === 'Polygon') {
+                    const coords = feature.geometry.coordinates[0];
+                    createPolygonWater360(coords, depth, maxDepth);
+                }
             });
         }
-        
-        function createSimpleWater(x, z, width, depth, waterDepth) {
-            const geometry = new THREE.PlaneGeometry(width, depth, 32, 32);
+
+        function createPolygonWater(coordinates, depth, maxDepth, targetScene) {
+            const points = [];
+            coordinates.forEach(coord => {
+                const mercator = maptilersdk.MercatorCoordinate.fromLngLat([coord[0], coord[1]]);
+                const x = (mercator.x - modelTransform.translateX) / modelTransform.scale;
+                const y = (mercator.y - modelTransform.translateY) / modelTransform.scale;
+                points.push(new THREE.Vector2(x, y));
+            });
+
+            if (points.length < 3) return;
+
+            const shape = new THREE.Shape(points);
+            const geometry = new THREE.ShapeGeometry(shape, 24);
             geometry.rotateX(-Math.PI / 2);
-            
-            const material = new THREE.ShaderMaterial({
+
+            const waterMaterial = new THREE.ShaderMaterial({
                 uniforms: {
                     time: { value: 0 },
-                    depth: { value: waterDepth },
-                    maxDepth: { value: 2.0 }
+                    depth: { value: depth },
+                    maxDepth: { value: maxDepth }
                 },
                 vertexShader: `
                     uniform float time;
                     uniform float depth;
                     varying vec2 vUv;
-                    varying vec3 vPos;
-                    varying float vWave;
-                    
+                    varying vec3 vPosition;
+                    varying float vElevation;
+                   
                     void main() {
                         vUv = uv;
-                        vPos = position;
+                        vPosition = position;
                         vec3 pos = position;
-                        float wave = sin(pos.x * 0.15 + time) * 0.03 + 
-                                   sin(pos.z * 0.2 - time * 0.8) * 0.025;
-                        vWave = wave;
+                       
+                        float wave = 0.0;
+                        wave += sin(pos.x * 0.008 + time * 0.5) * 0.8;
+                        wave += sin(pos.z * 0.01 - time * 0.4) * 0.6;
+                        wave += sin(pos.x * 0.015 + pos.z * 0.012 + time * 0.8) * 0.5;
+                       
+                        vElevation = wave;
                         pos.y = depth + wave;
+                       
                         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
                     }
                 `,
@@ -550,72 +659,54 @@
                     uniform float depth;
                     uniform float maxDepth;
                     varying vec2 vUv;
-                    varying vec3 vPos;
-                    varying float vWave;
-                    
+                    varying vec3 vPosition;
+                    varying float vElevation;
+                   
                     vec3 getDepthColor(float d) {
                         if (d < 0.5) return vec3(0.73, 0.87, 0.98);
                         else if (d < 1.0) return vec3(0.26, 0.65, 0.96);
                         else if (d < 2.0) return vec3(0.10, 0.46, 0.82);
                         else return vec3(0.05, 0.28, 0.63);
                     }
-                    
+                   
                     void main() {
                         vec3 color = getDepthColor(depth);
-                        float caustics = sin(vPos.x * 2.0 + time) * cos(vPos.z * 2.0 - time);
-                        color += vec3(pow(abs(caustics), 0.8) * 0.15);
-                        float highlight = smoothstep(0.015, 0.03, vWave) * 0.25;
+                        float caustics = sin(vPosition.x * 2.0 + time) * cos(vPosition.z * 2.0 - time);
+                        color += vec3(pow(abs(caustics), 0.8) * 0.2);
+                        float highlight = smoothstep(0.3, 0.7, vElevation) * 0.15;
                         color += vec3(highlight);
                         gl_FragColor = vec4(color, 0.75);
                     }
                 `,
                 transparent: true,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthWrite: false
             });
-            
-            const water = new THREE.Mesh(geometry, material);
-            water.position.set(x, 0, z);
-            scene.add(water);
-            waterMeshes.push(water);
+
+            const waterMesh = new THREE.Mesh(geometry, waterMaterial);
+            waterMesh.position.y = 0;
+            targetScene.add(waterMesh);
+            waterMeshes.push(waterMesh);
         }
-        
-        function createWaterFromGeoJSON(geojsonData) {
-            if (geojsonData.type !== 'FeatureCollection') return;
-            
-            let count = 0;
-            let maxDepth = 0;
-            
-            geojsonData.features.forEach(feature => {
-                if (!feature.geometry || !feature.properties) return;
-                
-                const depth = parseFloat(feature.properties.value);
-                if (isNaN(depth) || depth <= 0) return;
-                
-                maxDepth = Math.max(maxDepth, depth);
-                
-                if (feature.geometry.type === 'Polygon') {
-                    const coords = feature.geometry.coordinates[0];
-                    createWaterPolygon(coords, depth, maxDepth);
-                    count++;
-                }
-            });
-            
-            console.log(`Created ${count} water bodies. Max depth: ${maxDepth}m`);
-        }
-        
-        function createWaterPolygon(coordinates, depth, maxDepth) {
+
+        function createPolygonWater360(coordinates, depth, maxDepth) {
+            const CENTER_LAT = 28.448;
+            const CENTER_LNG = 77.027;
+            const METERS_PER_DEGREE_LAT = 111320;
+            const METERS_PER_DEGREE_LNG = METERS_PER_DEGREE_LAT * Math.cos(CENTER_LAT * Math.PI / 180);
+
             const points = coordinates.map(coord => {
-                const x = (coord[0] - REFERENCE_LNG) * METERS_PER_DEGREE_LNG;
-                const z = -(coord[1] - REFERENCE_LAT) * METERS_PER_DEGREE_LAT;
+                const x = (coord[0] - CENTER_LNG) * METERS_PER_DEGREE_LNG;
+                const z = -(coord[1] - CENTER_LAT) * METERS_PER_DEGREE_LAT;
                 return new THREE.Vector2(x, z);
             });
-            
+
             if (points.length < 3) return;
-            
+
             const shape = new THREE.Shape(points);
-            const geometry = new THREE.ShapeGeometry(shape, 32);
+            const geometry = new THREE.ShapeGeometry(shape, 16);
             geometry.rotateX(-Math.PI / 2);
-            
+
             const waterMaterial = new THREE.ShaderMaterial({
                 uniforms: {
                     time: { value: 0 },
@@ -634,10 +725,9 @@
                         vPos = position;
                         vec3 pos = position;
                         float wave = sin(pos.x * 0.1 + time) * 0.02 +
-                                   sin(pos.z * 0.15 - time * 0.8) * 0.015 +
-                                   sin(pos.x * 0.2 + pos.z * 0.2 + time * 1.5) * 0.01;
+                                   sin(pos.z * 0.15 - time * 0.8) * 0.015;
                         vWave = wave;
-                        pos.y = depth + wave;
+                        pos.y = depth * 0.5 + wave;
                         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
                     }
                 `,
@@ -645,7 +735,6 @@
                     uniform float time;
                     uniform float depth;
                     uniform float maxDepth;
-                    varying vec2 vUv;
                     varying vec3 vPos;
                     varying float vWave;
                     
@@ -659,57 +748,85 @@
                     void main() {
                         vec3 color = getDepthColor(depth);
                         float caustics = sin(vPos.x * 2.0 + time) * cos(vPos.z * 2.0 - time);
-                        caustics = pow(abs(caustics), 0.8) * 0.3;
-                        color += vec3(caustics * 0.2);
-                        float highlight = smoothstep(0.01, 0.02, vWave) * 0.3;
-                        color += vec3(highlight);
-                        float alpha = 0.7 + (depth / maxDepth) * 0.2;
-                        gl_FragColor = vec4(color, alpha);
+                        color += vec3(pow(abs(caustics), 0.8) * 0.15);
+                        gl_FragColor = vec4(color, 0.7);
                     }
                 `,
                 transparent: true,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthWrite: false
             });
-            
+
             const waterMesh = new THREE.Mesh(geometry, waterMaterial);
-            waterMesh.position.y = 0;
-            scene.add(waterMesh);
-            waterMeshes.push(waterMesh);
+            waterMesh.position.y = 0.05;
+            vrScene.add(waterMesh);
         }
-        
-        function animate() {
+
+        function switchMode(mode) {
+            currentMode = mode;
+            
+            document.getElementById('mode2d').classList.toggle('active', mode === '2d');
+            document.getElementById('mode360').classList.toggle('active', mode === '360');
+            
+            if (mode === '2d') {
+                document.getElementById('map').style.display = 'block';
+                document.getElementById('vr-canvas').style.display = 'none';
+                updateStatus('2D Map View');
+                
+                if (map) {
+                    map.resize();
+                    map.triggerRepaint();
+                }
+            } else {
+                document.getElementById('map').style.display = 'none';
+                document.getElementById('vr-canvas').style.display = 'block';
+                updateStatus('360° Immersive View');
+                
+                if (!vrScene) {
+                    init360Scene();
+                }
+                
+                if (vrRenderer) {
+                    vrRenderer.setAnimationLoop(animate360);
+                }
+            }
+        }
+
+        function animate360() {
             const time = performance.now() * 0.001;
             
-            // Update desktop movement
             updateMovement();
             
-            // Update water animation
-            waterMeshes.forEach(mesh => {
-                if (mesh.material.uniforms) {
-                    mesh.material.uniforms.time.value = time;
-                }
-            });
+            if (vrScene) {
+                vrScene.traverse((child) => {
+                    if (child.isMesh && child.material.uniforms && child.material.uniforms.time) {
+                        child.material.uniforms.time.value = time;
+                    }
+                });
+            }
             
-            renderer.render(scene, camera);
+            if (vrRenderer && vrCamera && vrScene) {
+                vrRenderer.render(vrScene, vrCamera);
+            }
         }
-        
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-        
+
+        window.addEventListener('resize', () => {
+            if (map) map.resize();
+            
+            if (vrCamera && vrRenderer) {
+                vrCamera.aspect = window.innerWidth / window.innerHeight;
+                vrCamera.updateProjectionMatrix();
+                vrRenderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+
         function updateStatus(text) {
             document.getElementById('status').textContent = text;
         }
-        
+
         function updateProgress(percent) {
             document.getElementById('progress').style.width = percent + '%';
         }
-        
-        // Initialize the scene
-        init();
     </script>
 </body>
 </html>
-
