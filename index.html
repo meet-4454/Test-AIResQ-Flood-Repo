@@ -1,492 +1,217 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Drone Flood Visualization</title>
-    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
-    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <style>
-        body { margin: 0; padding: 0; overflow: hidden; font-family: Arial, sans-serif; }
-        #map { width: 100vw; height: 100vh; }
-        
-        #ui {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255,255,255,0.95);
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-            z-index: 1000;
-            max-width: 280px;
-        }
-        
-        #ui h3 { margin: 0 0 15px 0; color: #1e40af; }
-        
-        .legend-item {
-            display: flex;
-            align-items: center;
-            margin: 8px 0;
-            font-size: 13px;
-        }
-        
-        .legend-color {
-            width: 30px;
-            height: 16px;
-            margin-right: 10px;
-            border-radius: 4px;
-        }
-        
-        #vrButton {
-            width: 100%;
-            padding: 16px;
-            margin-top: 15px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-        }
-        
-        #vrButton:hover { transform: scale(1.02); }
-        #vrButton:disabled { background: #999; cursor: not-allowed; }
-        
-        .controls-hint {
-            margin-top: 12px;
-            padding: 12px;
-            background: #e0f2fe;
-            border-radius: 8px;
-            font-size: 12px;
-        }
-        
-        #droneHUD {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(0,0,0,0.8);
-            color: #0ff;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 14px;
-            z-index: 2000;
-            display: none;
-            border: 2px solid rgba(0,255,255,0.4);
-        }
-        
-        #droneControls {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.9);
-            padding: 20px;
-            border-radius: 12px;
-            z-index: 2000;
-            display: none;
-            text-align: center;
-        }
-        
-        #droneControls h4 { color: #fff; margin: 0 0 15px 0; }
-        
-        .control-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 80px);
-            gap: 10px;
-        }
-        
-        .ctrl-btn {
-            background: rgba(102,126,234,0.8);
-            border: 2px solid rgba(255,255,255,0.3);
-            color: white;
-            padding: 15px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.2s;
-        }
-        
-        .ctrl-btn:hover { background: rgba(118,75,162,0.9); }
-        .ctrl-btn:active { transform: scale(0.95); }
-        
-        #exitVR {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(220,38,38,0.9);
-            color: white;
-            border: 2px solid white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            z-index: 2001;
-            display: none;
-        }
-        
-        .crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 30px;
-            height: 30px;
-            border: 2px solid rgba(0,255,255,0.8);
-            border-radius: 50%;
-            z-index: 1999;
-            display: none;
-        }
-        
-        .crosshair::before {
-            content: '';
-            position: absolute;
-            width: 2px;
-            height: 12px;
-            background: rgba(0,255,255,0.8);
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-        }
-        
-        .crosshair::after {
-            content: '';
-            position: absolute;
-            width: 12px;
-            height: 2px;
-            background: rgba(0,255,255,0.8);
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-        }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    
-    <div id="ui">
-        <h3>🚁 VR Drone Flood View</h3>
-        <div class="legend-item"><div class="legend-color" style="background:#bbdefb;"></div>&lt; 0.5 m</div>
-        <div class="legend-item"><div class="legend-color" style="background:#42a5f5;"></div>0.5 – 1 m</div>
-        <div class="legend-item"><div class="legend-color" style="background:#1976d2;"></div>1 – 2 m</div>
-        <div class="legend-item"><div class="legend-color" style="background:#0d47a1;"></div>&gt; 2 m</div>
-        <button id="vrButton" disabled>Loading...</button>
-        <div class="controls-hint">
-            <strong>Drone Controls:</strong><br>
-            WASD: Move | Mouse: Look<br>
-            Space/Shift: Up/Down<br>
-            Q/E: Rotate
-        </div>
-    </div>
-    
-    <div class="crosshair"></div>
-    
-    <div id="droneHUD">
-        <div>🚁 DRONE ACTIVE</div>
-        <div>Alt: <span id="alt">0</span>m</div>
-        <div>Pos: <span id="pos">0,0</span></div>
-        <div>Heading: <span id="head">0</span>°</div>
-    </div>
-    
-    <div id="droneControls">
-        <h4>Touch Controls</h4>
-        <div class="control-grid">
-            <div></div>
-            <div class="ctrl-btn" id="up">↑</div>
-            <div></div>
-            <div class="ctrl-btn" id="left">←</div>
-            <div class="ctrl-btn" id="ascend">⬆</div>
-            <div class="ctrl-btn" id="right">→</div>
-            <div></div>
-            <div class="ctrl-btn" id="down">↓</div>
-            <div class="ctrl-btn" id="descend">⬇</div>
-        </div>
-    </div>
-    
-    <button id="exitVR">Exit Drone Mode</button>
+<meta charset="UTF-8">
+<title>360° Flood Panorama – No CORS Issues</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+    body { margin:0; overflow:hidden; background:#000; }
+    #info { position:absolute; top:15px; left:50%; transform:translateX(-50%); color:#0ff; background:rgba(0,0,0,0.6); padding:10px 20px; border-radius:30px; font-family:Arial; pointer-events:none; z-index:100; }
+    #loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.9); color:#0ff; padding:25px 50px; border-radius:15px; font-size:22px; font-family:monospace; z-index:1000; }
+</style>
 
-    <script>
-        let map, scene, camera, renderer, modelTransform;
-        let waterMeshes = [];
-        let vrActive = false;
-        let dronePos = new THREE.Vector3(0, 25, 30);
-        let droneRot = new THREE.Euler(0, 0, 0);
-        let droneVel = new THREE.Vector3();
-        let rotVel = 0;
-        
-        const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
-        const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
-        
-        maptilersdk.config.apiKey = API_KEY;
-        
-        const customLayer = {
-            id: '3d-water',
-            type: 'custom',
-            renderingMode: '3d',
-            
-            onAdd: function(m, gl) {
-                camera = new THREE.Camera();
-                scene = new THREE.Scene();
-                
-                scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-                
-                const light1 = new THREE.DirectionalLight(0xffffff, 0.8);
-                light1.position.set(100, 200, 100);
-                scene.add(light1);
-                
-                const light2 = new THREE.DirectionalLight(0xffffff, 0.4);
-                light2.position.set(-100, 100, -100);
-                scene.add(light2);
-                
-                renderer = new THREE.WebGLRenderer({
-                    canvas: m.getCanvas(),
-                    context: gl,
-                    antialias: true
-                });
-                renderer.autoClear = false;
-            },
-            
-            render: function(gl, matrix) {
-                if (vrActive) return;
-                
-                const m = new THREE.Matrix4().fromArray(matrix);
-                const l = new THREE.Matrix4()
-                    .makeTranslation(
-                        modelTransform.translateX,
-                        modelTransform.translateY,
-                        modelTransform.translateZ
-                    )
-                    .scale(new THREE.Vector3(
-                        modelTransform.scale,
-                        -modelTransform.scale,
-                        modelTransform.scale
-                    ))
-                    .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-                
-                camera.projectionMatrix = m.multiply(l);
-                
-                const time = performance.now() * 0.001;
-                waterMeshes.forEach(mesh => {
-                    if (mesh.material.uniforms) {
-                        mesh.material.uniforms.time.value = time;
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body>
+<div id="info">360° Flood View – Drag • VR button for headset</div>
+<div id="loading">Loading 360° scene…</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// Load MapTiler SDK
+const mtScript = document.createElement('script');
+mtScript.src = 'https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js';
+document.head.appendChild(mtScript);
+
+const css = document.createElement('link');
+css.rel = 'stylesheet';
+css.href = 'https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css';
+document.head.appendChild(css);
+
+mtScript.onload = startApp;
+
+async function startApp() {
+    const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
+    const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson'; // ← your file here
+
+    maptilersdk.config.apiKey = API_KEY;
+
+    // ────────────────────── Three.js setup ──────────────────────
+    const scene   = new THREE.Scene();
+    const camera  = new THREE.PerspectiveCamera(90, innerWidth/innerHeight, 0.1, 10000);
+    camera.position.y = 20;
+
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.6;
+
+    // ────────────────────── Hidden MapTiler map (CORS-safe style) ──────────────────────
+    const mapDiv = document.createElement('div');
+    mapDiv.style.cssText = 'position:absolute; left:-9999px; width:1024px; height:1024px;';
+    document.body.appendChild(mapDiv);
+
+    const map = new maptilersdk.Map({
+        container: mapDiv,
+        // THIS IS THE IMPORTANT LINE – CORS-enabled style
+        style: `https://api.maptiler.com/maps/streets-v2/style.json?key=${API_KEY}`,
+        center: [77.027, 28.448],
+        zoom: 17.8,
+        pitch: 0,
+        bearing: 0,
+        interactive: false,
+        antialias: true
+    });
+
+    let mapTexture, modelTransform;
+    const waterGroup = new THREE.Group();
+    scene.add(waterGroup);
+
+    map.on('load', () => {
+        // 3D buildings
+        map.addLayer({
+            id: '3d-buildings',
+            source: 'composite',
+            'source-layer': 'building',
+            filter: ['==', 'extrude', 'true'],
+            type: 'fill-extrusion',
+            paint: {
+                'fill-extrusion-color': '#bbbbbb',
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
+                'fill-extrusion-opacity': 0.9
+            }
+        });
+
+        const origin = maptilersdk.MercatorCoordinate.fromLngLat([77.027, 28.448], 0);
+        modelTransform = {
+            translateX: origin.x,
+            translateY: origin.y,
+            translateZ: origin.z || 0,
+            scale: origin.meterInMercatorCoordinateUnits()
+        };
+
+        // Live skybox from the hidden map
+        mapTexture = new THREE.CanvasTexture(map.getCanvas());
+
+        const skyGeo = new THREE.SphereGeometry(9000, 60, 40);
+        skyGeo.scale(-1, 1, 1);
+        const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({
+            map: mapTexture,
+            side: THREE.BackSide,
+            depthWrite: false
+        }));
+        scene.add(sky);
+
+        loadFloodData();
+    });
+
+    // ────────────────────── Flood water ──────────────────────
+    async function loadFloodData() {
+        try {
+            const r = await fetch(GEOJSON_FILE);
+            if (!r.ok) throw new Error('Not found');
+            const data = await r.json();
+            createWater(data);
+            document.getElementById('loading').remove();
+        } catch (e) {
+            console.error(e);
+            document.getElementById('loading').textContent = 'Flood data failed';
+        }
+    }
+
+    function createWater(geojson) {
+        const timeUni = { value: 0 };
+
+        geojson.features.forEach(f => {
+            const depth = parseFloat(f.properties?.value || 0);
+            if (depth <= 0 || f.geometry.type !== 'Polygon') return;
+
+            const shape = new THREE.Shape();
+            f.geometry.coordinates[0].forEach((c, i) => {
+                const mc = maptilersdk.MercatorCoordinate.fromLngLat(c);
+                const x = (mc.x - modelTransform.translateX) / modelTransform.scale;
+                const z = (mc.y - modelTransform.translateY) / modelTransform.scale;
+                i===0 ? shape.moveTo(x,z) : shape.lineTo(x,z);
+            });
+
+            const geom = new THREE.ShapeGeometry(shape);
+            geom.rotateX(-Math.PI/2);
+
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { time: timeUni, depth: { value: depth } },
+                vertexShader: `
+                    uniform float time;
+                    void main() {
+                        vec3 p = position;
+                        float wave = sin(p.x*12.+time*3.)*0.04 + sin(p.z*15.-time*2.5)*0.03;
+                        p.y += wave;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
                     }
-                });
-                
-                renderer.resetState();
-                renderer.render(scene, camera);
-                map.triggerRepaint();
-            }
-        };
-        
-        map = new maptilersdk.Map({
-            container: 'map',
-            style: maptilersdk.MapStyle.STREETS,
-            center: [77.027, 28.448],
-            zoom: 16,
-            pitch: 60,
-            bearing: -20,
-            antialias: true
-        });
-        
-        map.on('style.load', () => {
-            map.addLayer({
-                'id': '3d-buildings',
-                'source': 'composite',
-                'source-layer': 'building',
-                'filter': ['==', 'extrude', 'true'],
-                'type': 'fill-extrusion',
-                'minzoom': 14,
-                'paint': {
-                    'fill-extrusion-color': '#e0e0e0',
-                    'fill-extrusion-height': ['get', 'height'],
-                    'fill-extrusion-base': ['get', 'min_height'],
-                    'fill-extrusion-opacity': 0.9
-                }
+                `,
+                fragmentShader: `
+                    uniform float depth;
+                    vec3 col(float d){
+                        if(d<0.5)return vec3(0.73,0.87,0.98);
+                        if(d<1.0)return vec3(0.26,0.65,0.96);
+                        if(d<2.0)return vec3(0.10,0.46,0.82);
+                        return vec3(0.05,0.28,0.63);
+                    }
+                    void main(){
+                        gl_FragColor = vec4(col(depth), 0.82);
+                    }
+                `,
+                transparent: true,
+                side: THREE.DoubleSide
             });
-            
-            const origin = maptilersdk.MercatorCoordinate.fromLngLat([77.027, 28.448], 0);
-            modelTransform = {
-                translateX: origin.x,
-                translateY: origin.y,
-                translateZ: origin.z,
-                scale: origin.meterInMercatorCoordinateUnits()
-            };
-            
-            map.addLayer(customLayer);
-            loadFloodData();
+
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.y = depth;
+            waterGroup.add(mesh);
         });
-        
-        async function loadFloodData() {
-            try {
-                const res = await fetch(GEOJSON_FILE);
-                if (!res.ok) throw new Error('File not found');
-                const data = await res.json();
-                createWater(data);
-                document.getElementById('vrButton').disabled = false;
-                document.getElementById('vrButton').textContent = '🚁 Enter VR Drone';
-                document.getElementById('vrButton').onclick = startVR;
-            } catch (err) {
-                alert('Error: ' + err.message);
-            }
-        }
-        
-        function createWater(data) {
-            let maxDepth = 0;
-            
-            data.features.forEach(f => {
-                if (!f.geometry || !f.properties) return;
-                const depth = parseFloat(f.properties.value);
-                if (isNaN(depth) || depth <= 0) return;
-                maxDepth = Math.max(maxDepth, depth);
-                
-                if (f.geometry.type === 'Polygon') {
-                    const coords = f.geometry.coordinates[0];
-                    const points = coords.map(c => {
-                        const m = maptilersdk.MercatorCoordinate.fromLngLat([c[0], c[1]]);
-                        return new THREE.Vector2(
-                            (m.x - modelTransform.translateX) / modelTransform.scale,
-                            (m.y - modelTransform.translateY) / modelTransform.scale
-                        );
-                    });
-                    
-                    if (points.length < 3) return;
-                    
-                    const shape = new THREE.Shape(points);
-                    const geom = new THREE.ShapeGeometry(shape, 32);
-                    geom.rotateX(-Math.PI / 2);
-                    
-                    const mat = new THREE.ShaderMaterial({
-                        uniforms: {
-                            time: { value: 0 },
-                            depth: { value: depth },
-                            maxDepth: { value: maxDepth }
-                        },
-                        vertexShader: `
-                            uniform float time; uniform float depth;
-                            varying vec3 vPos; varying float vWave;
-                            void main() {
-                                vPos = position; vec3 pos = position;
-                                float wave = sin(pos.x*0.01+time)*0.5 + sin(pos.z*0.015-time*0.8)*0.4;
-                                vWave = wave; pos.y = depth + wave;
-                                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-                            }
-                        `,
-                        fragmentShader: `
-                            uniform float depth, time;
-                            varying vec3 vPos; varying float vWave;
-                            vec3 getColor(float d) {
-                                if(d<0.5) return vec3(0.73,0.87,0.98);
-                                if(d<1.0) return vec3(0.26,0.65,0.96);
-                                if(d<2.0) return vec3(0.10,0.46,0.82);
-                                return vec3(0.05,0.28,0.63);
-                            }
-                            void main() {
-                                vec3 col = getColor(depth);
-                                float c = sin(vPos.x*2.0+time)*cos(vPos.z*2.0-time);
-                                col += vec3(pow(abs(c),0.8)*0.2);
-                                gl_FragColor = vec4(col, 0.75);
-                            }
-                        `,
-                        transparent: true,
-                        side: THREE.DoubleSide
-                    });
-                    
-                    const mesh = new THREE.Mesh(geom, mat);
-                    scene.add(mesh);
-                    waterMeshes.push(mesh);
-                }
-            });
-        }
-        
-        function startVR() {
-            vrActive = true;
-            document.getElementById('ui').style.display = 'none';
-            document.getElementById('droneHUD').style.display = 'block';
-            document.getElementById('droneControls').style.display = 'block';
-            document.getElementById('exitVR').style.display = 'block';
-            document.querySelector('.crosshair').style.display = 'block';
-            
-            map.setPitch(0);
-            map.setBearing(0);
-            
-            animate();
-        }
-        
-        document.getElementById('exitVR').onclick = () => {
-            vrActive = false;
-            document.getElementById('ui').style.display = 'block';
-            document.getElementById('droneHUD').style.display = 'none';
-            document.getElementById('droneControls').style.display = 'none';
-            document.getElementById('exitVR').style.display = 'none';
-            document.querySelector('.crosshair').style.display = 'none';
-        };
-        
-        const keys = {};
-        window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-        
-        let mouseX = 0, mouseY = 0;
-        document.addEventListener('mousemove', e => {
-            if (!vrActive) return;
-            mouseX = (e.clientX / window.innerWidth - 0.5) * 4;
-            mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+    }
+
+    // ────────────────────── Animation ──────────────────────
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        if (mapTexture) mapTexture.needsUpdate = true;
+
+        const t = performance.now() * 0.001;
+        waterGroup.children.forEach(m => {
+            if (m.material.uniforms?.time) m.material.uniforms.time.value = t;
         });
-        
-        // Touch controls
-        document.getElementById('up').addEventListener('mousedown', () => droneVel.z = -0.5);
-        document.getElementById('down').addEventListener('mousedown', () => droneVel.z = 0.5);
-        document.getElementById('left').addEventListener('mousedown', () => droneVel.x = -0.5);
-        document.getElementById('right').addEventListener('mousedown', () => droneVel.x = 0.5);
-        document.getElementById('ascend').addEventListener('mousedown', () => droneVel.y = 0.5);
-        document.getElementById('descend').addEventListener('mousedown', () => droneVel.y = -0.5);
-        
-        document.querySelectorAll('.ctrl-btn').forEach(btn => {
-            btn.addEventListener('mouseup', () => droneVel.set(0,0,0));
-            btn.addEventListener('mouseleave', () => droneVel.set(0,0,0));
-        });
-        
-        function animate() {
-            if (!vrActive) return;
-            requestAnimationFrame(animate);
-            
-            // Keyboard controls
-            const vel = new THREE.Vector3();
-            if (keys['w']) vel.z = -0.5;
-            if (keys['s']) vel.z = 0.5;
-            if (keys['a']) vel.x = -0.5;
-            if (keys['d']) vel.x = 0.5;
-            if (keys[' ']) vel.y = 0.5;
-            if (keys['shift']) vel.y = -0.5;
-            if (keys['q']) rotVel = -0.02;
-            else if (keys['e']) rotVel = 0.02;
-            else rotVel *= 0.9;
-            
-            vel.add(droneVel);
-            vel.applyEuler(new THREE.Euler(0, droneRot.y, 0));
-            dronePos.add(vel);
-            droneRot.y += rotVel;
-            
-            dronePos.y = Math.max(2, dronePos.y);
-            
-            // Update map to follow drone
-            const lng = 77.027 + (dronePos.x / 111320);
-            const lat = 28.448 - (dronePos.z / 111320);
-            
-            map.setCenter([lng, lat]);
-            map.setZoom(17 - dronePos.y / 10);
-            map.setBearing(droneRot.y * 180 / Math.PI);
-            map.setPitch(60 - Math.abs(mouseY) * 20);
-            
-            // Update HUD
-            document.getElementById('alt').textContent = dronePos.y.toFixed(1);
-            document.getElementById('pos').textContent = `${dronePos.x.toFixed(0)},${dronePos.z.toFixed(0)}`;
-            document.getElementById('head').textContent = Math.round((droneRot.y * 180 / Math.PI) % 360);
-            
-            map.triggerRepaint();
-        }
-    </script>
+
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = innerWidth/innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+    });
+
+    animate();
+}
+</script>
 </body>
 </html>
