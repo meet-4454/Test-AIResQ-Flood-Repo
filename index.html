@@ -58,6 +58,49 @@
             font-size: 11px;
             border-left: 4px solid #f59e0b;
         }
+        
+        #enter-vr-btn {
+            margin-top: 15px;
+            padding: 10px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            display: none;
+            width: 100%;
+        }
+        
+        #enter-vr-btn:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        }
+        
+        #vr-status {
+            margin-top: 10px;
+            font-size: 12px;
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .vr-active {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            color: #065f46;
+            border: 2px solid #10b981;
+        }
+        
+        .vr-available {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            color: #92400e;
+            border: 2px solid #f59e0b;
+        }
+        
+        .vr-unavailable {
+            background: #f3f4f6;
+            color: #6b7280;
+            border: 2px solid #d1d5db;
+        }
     </style>
 </head>
 <body>
@@ -84,9 +127,18 @@
             <div class="legend-color" style="background:#0d47a1;"></div>
             &gt; 2 m depth
         </div>
+        
+        <button id="enter-vr-btn">🥽 ENTER VR MODE</button>
+        <div id="vr-status" class="vr-unavailable">Checking VR support...</div>
+        
         <div class="vr-info">
-            <strong>🥽 Enter VR Mode:</strong>
-            Click the AR/VR button (bottom-right) on Meta Quest 3 browser
+            <strong>Meta Quest 3 Instructions:</strong>
+            <ol style="margin: 8px 0; padding-left: 20px;">
+                <li>Click "ENTER VR MODE" button above</li>
+                <li>Allow VR permission when prompted</li>
+                <li>Use controller thumbsticks to move</li>
+                <li>Press Menu button to exit VR</li>
+            </ol>
         </div>
     </div>
 
@@ -97,22 +149,28 @@
         const CENTER_LAT = 28.448;
         
         let map;
+        let vrSupported = false;
+        let vrSession = null;
         
         maptilersdk.config.apiKey = API_KEY;
         
         // Initialize map with the exact style you want
         map = new maptilersdk.Map({
             container: 'map',
-            style: maptilersdk.MapStyle.STREETS, // Clean streets basemap
+            style: maptilersdk.MapStyle.STREETS,
             center: [CENTER_LNG, CENTER_LAT],
             zoom: 16,
             pitch: 60,
             bearing: -20,
             antialias: true,
-            hash: false
+            hash: false,
+            // Enable WebGL2 for better VR performance
+            contextAttributes: {
+                xrCompatible: true
+            }
         });
         
-        map.on('load', () => {
+        map.on('load', async () => {
             // Add terrain for natural elevation
             map.addSource('terrain', {
                 type: 'raster-dem',
@@ -144,8 +202,9 @@
             // Load and add flood water as extruded layer
             loadFloodData();
             
-            // Add AR/VR control
-            addARControl();
+            // Check VR support and setup
+            await checkVRSupport();
+            setupVRControls();
         });
         
         async function loadFloodData() {
@@ -166,21 +225,19 @@
                     'type': 'fill-extrusion',
                     'source': 'flood-data',
                     'paint': {
-                        // Color based on water depth (value property)
                         'fill-extrusion-color': [
                             'interpolate',
                             ['linear'],
                             ['get', 'value'],
-                            0, '#bbdefb',      // < 0.5m - light blue
-                            0.5, '#42a5f5',    // 0.5-1m - medium blue
-                            1.0, '#1976d2',    // 1-2m - dark blue
-                            2.0, '#0d47a1'     // > 2m - very dark blue
+                            0, '#bbdefb',
+                            0.5, '#42a5f5',
+                            1.0, '#1976d2',
+                            2.0, '#0d47a1'
                         ],
-                        // Height based on water depth
                         'fill-extrusion-height': [
                             '*',
                             ['get', 'value'],
-                            1  // Scale factor: 1 meter of water = 1 meter height
+                            1
                         ],
                         'fill-extrusion-base': 0,
                         'fill-extrusion-opacity': 0.7
@@ -195,23 +252,83 @@
             }
         }
         
-        function addARControl() {
-            // Add MapTiler's native AR/VR control for WebXR
-            const arControl = new maptilersdk.ARControl();
-            map.addControl(arControl, 'bottom-right');
-            
-            // Check WebXR support
+        async function checkVRSupport() {
             if (navigator.xr) {
-                navigator.xr.isSessionSupported('immersive-vr').then(supported => {
-                    if (supported) {
-                        console.log('✅ Meta Quest 3 VR ready! Click AR button to enter VR.');
+                try {
+                    // Check for immersive-vr support (Meta Quest 3)
+                    vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                    
+                    if (vrSupported) {
+                        console.log('✅ Meta Quest 3 VR supported!');
+                        document.getElementById('vr-status').className = 'vr-available';
+                        document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
+                        document.getElementById('enter-vr-btn').style.display = 'block';
                     } else {
                         console.log('⚠️ VR not supported on this device');
+                        document.getElementById('vr-status').className = 'vr-unavailable';
+                        document.getElementById('vr-status').textContent = 'VR not supported on this device';
                     }
-                });
+                } catch (error) {
+                    console.error('Error checking VR support:', error);
+                    document.getElementById('vr-status').className = 'vr-unavailable';
+                    document.getElementById('vr-status').textContent = 'Error checking VR support';
+                }
             } else {
                 console.log('⚠️ WebXR not available');
+                document.getElementById('vr-status').className = 'vr-unavailable';
+                document.getElementById('vr-status').textContent = 'WebXR not available in this browser';
             }
+        }
+        
+        function setupVRControls() {
+            const enterVRBtn = document.getElementById('enter-vr-btn');
+            
+            enterVRBtn.addEventListener('click', async () => {
+                if (!vrSupported) {
+                    alert('VR is not supported on your device/browser');
+                    return;
+                }
+                
+                try {
+                    // Request VR session
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        requiredFeatures: ['local-floor'],
+                        optionalFeatures: ['bounded-floor', 'hand-tracking']
+                    });
+                    
+                    vrSession = session;
+                    
+                    // Update UI to show VR is active
+                    document.getElementById('vr-status').className = 'vr-active';
+                    document.getElementById('vr-status').textContent = 'VR MODE ACTIVE';
+                    enterVRBtn.textContent = 'EXITING VR...';
+                    enterVRBtn.disabled = true;
+                    
+                    // Use MapTiler's built-in AR/VR control for WebXR
+                    if (maptilersdk.ARControl) {
+                        const arControl = new maptilersdk.ARControl();
+                        map.addControl(arControl, 'bottom-right');
+                        arControl.start(session);
+                    }
+                    
+                    // Handle session end
+                    session.addEventListener('end', () => {
+                        vrSession = null;
+                        document.getElementById('vr-status').className = 'vr-available';
+                        document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
+                        enterVRBtn.textContent = '🥽 ENTER VR MODE';
+                        enterVRBtn.disabled = false;
+                    });
+                    
+                } catch (error) {
+                    console.error('Failed to enter VR:', error);
+                    alert('Failed to enter VR mode: ' + error.message);
+                    document.getElementById('vr-status').className = 'vr-available';
+                    document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
+                    enterVRBtn.textContent = '🥽 ENTER VR MODE';
+                    enterVRBtn.disabled = false;
+                }
+            });
         }
         
         // Keyboard controls for desktop navigation
