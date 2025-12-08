@@ -469,16 +469,8 @@
                 vrScene.add(vrMesh);
             });
             
-            // Add ground plane
-            const groundGeom = new THREE.PlaneGeometry(2000, 2000);
-            const groundMat = new THREE.MeshStandardMaterial({ 
-                color: 0x7cb342,
-                roughness: 0.8
-            });
-            const ground = new THREE.Mesh(groundGeom, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.y = -0.1;
-            vrScene.add(ground);
+            // Load MapTiler satellite/street tiles as ground texture
+            await loadMapTiles();
             
             // Add simple buildings
             createVRBuildings();
@@ -510,8 +502,78 @@
             }
         }
         
+        async function loadMapTiles() {
+            // Calculate tile coordinates for the center point at zoom 16
+            const zoom = 16;
+            const tileSize = 512;
+            const lat = CENTER_LAT;
+            const lng = CENTER_LNG;
+            
+            // Convert lat/lng to tile coordinates
+            const n = Math.pow(2, zoom);
+            const xtile = Math.floor((lng + 180) / 360 * n);
+            const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+            
+            // Load 3x3 grid of tiles centered on our location
+            const tilePromises = [];
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    tilePromises.push(loadSingleTile(xtile + dx, ytile + dy, zoom));
+                }
+            }
+            
+            const tiles = await Promise.all(tilePromises);
+            
+            // Create ground with tiles
+            tiles.forEach((tile, idx) => {
+                if (tile) {
+                    const dx = (idx % 3) - 1;
+                    const dy = Math.floor(idx / 3) - 1;
+                    
+                    const groundGeom = new THREE.PlaneGeometry(tileSize, tileSize);
+                    const groundMat = new THREE.MeshStandardMaterial({ 
+                        map: tile,
+                        roughness: 0.9
+                    });
+                    const ground = new THREE.Mesh(groundGeom, groundMat);
+                    ground.rotation.x = -Math.PI / 2;
+                    ground.position.set(dx * tileSize, -0.1, dy * tileSize);
+                    vrScene.add(ground);
+                }
+            });
+        }
+        
+        async function loadSingleTile(x, y, z) {
+            try {
+                // MapTiler satellite or streets tile URL
+                const url = `https://api.maptiler.com/maps/hybrid/${z}/${x}/${y}.jpg?key=${API_KEY}`;
+                
+                const texture = await new Promise((resolve, reject) => {
+                    const loader = new THREE.TextureLoader();
+                    loader.load(
+                        url,
+                        (tex) => {
+                            tex.wrapS = THREE.ClampToEdgeWrapping;
+                            tex.wrapT = THREE.ClampToEdgeWrapping;
+                            resolve(tex);
+                        },
+                        undefined,
+                        (err) => {
+                            console.error('Error loading tile:', err);
+                            resolve(null);
+                        }
+                    );
+                });
+                
+                return texture;
+            } catch (err) {
+                console.error('Tile load error:', err);
+                return null;
+            }
+        }
+        
         function createVRBuildings() {
-            // Create simple building representations
+            // Create realistic building representations based on common building footprints
             const buildingPositions = [
                 { x: -50, z: -50, w: 20, h: 30, d: 20 },
                 { x: 30, z: -60, w: 25, h: 40, d: 25 },
@@ -519,17 +581,21 @@
                 { x: 50, z: 50, w: 30, h: 35, d: 20 },
                 { x: 0, z: -80, w: 20, h: 28, d: 20 },
                 { x: -40, z: 70, w: 18, h: 32, d: 18 },
+                { x: 80, z: -30, w: 22, h: 45, d: 22 },
+                { x: -90, z: -20, w: 16, h: 26, d: 16 },
             ];
             
             buildingPositions.forEach(b => {
                 const geom = new THREE.BoxGeometry(b.w, b.h, b.d);
                 const mat = new THREE.MeshStandardMaterial({ 
-                    color: 0xe0e0e0,
+                    color: 0xe5e5e5,
                     roughness: 0.7,
                     metalness: 0.2
                 });
                 const building = new THREE.Mesh(geom, mat);
                 building.position.set(b.x, b.h / 2, b.z);
+                building.castShadow = true;
+                building.receiveShadow = true;
                 vrScene.add(building);
                 buildings.push(building);
             });
