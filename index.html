@@ -6,24 +6,16 @@
     <title>VR Flood Visualization - Meta Quest 3</title>
     <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
     <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body { 
             margin: 0; 
             padding: 0; 
             overflow: hidden; 
             font-family: Arial, sans-serif;
-            background: #000;
         }
-        #map { width: 100vw; height: 100vh; }
-        
-        #vrCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: none;
+        #map { 
+            width: 100vw; 
+            height: 100vh; 
         }
         
         #ui {
@@ -57,90 +49,24 @@
             margin-right: 10px;
             border-radius: 4px;
         }
-        
-        #vrButton {
-            width: 100%;
-            padding: 18px;
-            margin-top: 15px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-        }
-        
-        #vrButton:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-        }
-        #vrButton:disabled { 
-            background: #999; 
-            cursor: not-allowed; 
-            transform: none;
-        }
-        
-        .info-box {
+
+        .vr-info {
             margin-top: 12px;
             padding: 12px;
-            background: linear-gradient(135deg, #e0f2fe, #dbeafe);
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
             border-radius: 8px;
-            font-size: 12px;
-            border-left: 4px solid #3b82f6;
-        }
-        
-        .info-box strong {
-            display: block;
-            margin-bottom: 6px;
-            color: #1e40af;
-        }
-        
-        #loadingMsg {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.9);
-            color: white;
-            padding: 30px 50px;
-            border-radius: 12px;
-            font-size: 18px;
-            z-index: 10000;
-            display: none;
-            text-align: center;
-        }
-        
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto 0;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            font-size: 11px;
+            border-left: 4px solid #f59e0b;
         }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    <canvas id="vrCanvas"></canvas>
-    <div id="loadingMsg">
-        <div>Loading VR Environment...</div>
-        <div class="loader"></div>
-    </div>
     
     <div id="ui">
         <h3>🌊 VR Flood Visualization</h3>
         <div style="font-size: 12px; color: #666; margin-bottom: 12px;">
-            Optimized for Meta Quest 3
+            Meta Quest 3 Ready
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background:#bbdefb;"></div>
@@ -158,114 +84,48 @@
             <div class="legend-color" style="background:#0d47a1;"></div>
             &gt; 2 m depth
         </div>
-        <button id="vrButton" disabled>Initializing...</button>
-        <div class="info-box">
-            <strong>🥽 VR Controls:</strong>
-            Look around: Move your head<br>
-            Move: Use thumbsticks<br>
-            Teleport: Point & trigger<br>
-            Height: Y button (up/down)
+        <div class="vr-info">
+            <strong>🥽 Enter VR Mode:</strong>
+            Click the AR/VR button (bottom-right) on Meta Quest 3 browser
         </div>
     </div>
 
     <script>
-        let map, scene, camera, renderer, modelTransform;
-        let vrScene, vrCamera, vrRenderer;
-        let waterMeshes = [];
-        let buildings = [];
-        let controller1, controller2;
-        let dolly, cameraGroup;
-        let floodData = null;
-        let isVRSupported = false;
-        
         const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
         const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
         const CENTER_LNG = 77.027;
         const CENTER_LAT = 28.448;
         
+        let map;
+        
         maptilersdk.config.apiKey = API_KEY;
         
-        // Initialize 2D map first
+        // Initialize map with the exact style you want
         map = new maptilersdk.Map({
             container: 'map',
-            style: maptilersdk.MapStyle.STREETS,
+            style: maptilersdk.MapStyle.STREETS, // Clean streets basemap
             center: [CENTER_LNG, CENTER_LAT],
             zoom: 16,
             pitch: 60,
             bearing: -20,
             antialias: true,
-            terrain: {
-                source: 'terrain',
-                exaggeration: 1.5
-            }
+            hash: false
         });
         
-        // Custom 3D layer for the 2D map
-        const customLayer = {
-            id: '3d-water',
-            type: 'custom',
-            renderingMode: '3d',
-            
-            onAdd: function(m, gl) {
-                camera = new THREE.Camera();
-                scene = new THREE.Scene();
-                
-                scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-                
-                const light1 = new THREE.DirectionalLight(0xffffff, 0.8);
-                light1.position.set(100, 200, 100);
-                scene.add(light1);
-                
-                const light2 = new THREE.DirectionalLight(0xffffff, 0.4);
-                light2.position.set(-100, 100, -100);
-                scene.add(light2);
-                
-                renderer = new THREE.WebGLRenderer({
-                    canvas: m.getCanvas(),
-                    context: gl,
-                    antialias: true
-                });
-                renderer.autoClear = false;
-            },
-            
-            render: function(gl, matrix) {
-                const m = new THREE.Matrix4().fromArray(matrix);
-                const l = new THREE.Matrix4()
-                    .makeTranslation(
-                        modelTransform.translateX,
-                        modelTransform.translateY,
-                        modelTransform.translateZ
-                    )
-                    .scale(new THREE.Vector3(
-                        modelTransform.scale,
-                        -modelTransform.scale,
-                        modelTransform.scale
-                    ))
-                    .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-                
-                camera.projectionMatrix = m.multiply(l);
-                
-                const time = performance.now() * 0.001;
-                waterMeshes.forEach(mesh => {
-                    if (mesh.material.uniforms) {
-                        mesh.material.uniforms.time.value = time;
-                    }
-                });
-                
-                renderer.resetState();
-                renderer.render(scene, camera);
-                map.triggerRepaint();
-            }
-        };
-        
-        map.on('style.load', () => {
-            // Add terrain source
+        map.on('load', () => {
+            // Add terrain for natural elevation
             map.addSource('terrain', {
                 type: 'raster-dem',
-                url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${API_KEY}`
+                url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${API_KEY}`,
+                tileSize: 256
             });
             
-            // Add 3D buildings
+            map.setTerrain({
+                source: 'terrain',
+                exaggeration: 1.5
+            });
+            
+            // Add 3D buildings - extruded
             map.addLayer({
                 'id': '3d-buildings',
                 'source': 'composite',
@@ -281,507 +141,99 @@
                 }
             });
             
-            const origin = maptilersdk.MercatorCoordinate.fromLngLat([CENTER_LNG, CENTER_LAT], 0);
-            modelTransform = {
-                translateX: origin.x,
-                translateY: origin.y,
-                translateZ: origin.z,
-                scale: origin.meterInMercatorCoordinateUnits()
-            };
-            
-            map.addLayer(customLayer);
+            // Load and add flood water as extruded layer
             loadFloodData();
+            
+            // Add AR/VR control
+            addARControl();
         });
         
         async function loadFloodData() {
             try {
                 const res = await fetch(GEOJSON_FILE);
                 if (!res.ok) throw new Error('Flood data file not found');
-                floodData = await res.json();
-                createWater(floodData);
+                const data = await res.json();
                 
-                // Check WebXR support
-                if (navigator.xr) {
-                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
-                    isVRSupported = supported;
-                    
-                    document.getElementById('vrButton').disabled = false;
-                    document.getElementById('vrButton').textContent = supported ? 
-                        '🥽 Enter VR (Quest 3)' : '⚠️ VR Not Supported';
-                    
-                    if (supported) {
-                        document.getElementById('vrButton').onclick = initVR;
+                // Add flood data as a GeoJSON source
+                map.addSource('flood-data', {
+                    type: 'geojson',
+                    data: data
+                });
+                
+                // Add extruded water layer (just like buildings)
+                map.addLayer({
+                    'id': 'flood-water-3d',
+                    'type': 'fill-extrusion',
+                    'source': 'flood-data',
+                    'paint': {
+                        // Color based on water depth (value property)
+                        'fill-extrusion-color': [
+                            'interpolate',
+                            ['linear'],
+                            ['get', 'value'],
+                            0, '#bbdefb',      // < 0.5m - light blue
+                            0.5, '#42a5f5',    // 0.5-1m - medium blue
+                            1.0, '#1976d2',    // 1-2m - dark blue
+                            2.0, '#0d47a1'     // > 2m - very dark blue
+                        ],
+                        // Height based on water depth
+                        'fill-extrusion-height': [
+                            '*',
+                            ['get', 'value'],
+                            1  // Scale factor: 1 meter of water = 1 meter height
+                        ],
+                        'fill-extrusion-base': 0,
+                        'fill-extrusion-opacity': 0.7
                     }
-                } else {
-                    document.getElementById('vrButton').textContent = '⚠️ WebXR Not Available';
-                }
+                });
+                
+                console.log('Flood water layer added successfully');
+                
             } catch (err) {
                 console.error('Error loading flood data:', err);
                 alert('Error loading flood data: ' + err.message);
             }
         }
         
-        function createWater(data) {
-            let maxDepth = 0;
+        function addARControl() {
+            // Add MapTiler's native AR/VR control for WebXR
+            const arControl = new maptilersdk.ARControl();
+            map.addControl(arControl, 'bottom-right');
             
-            data.features.forEach(f => {
-                if (!f.geometry || !f.properties) return;
-                const depth = parseFloat(f.properties.value);
-                if (isNaN(depth) || depth <= 0) return;
-                maxDepth = Math.max(maxDepth, depth);
-                
-                if (f.geometry.type === 'Polygon') {
-                    const coords = f.geometry.coordinates[0];
-                    const points = coords.map(c => {
-                        const m = maptilersdk.MercatorCoordinate.fromLngLat([c[0], c[1]]);
-                        return new THREE.Vector2(
-                            (m.x - modelTransform.translateX) / modelTransform.scale,
-                            (m.y - modelTransform.translateY) / modelTransform.scale
-                        );
-                    });
-                    
-                    if (points.length < 3) return;
-                    
-                    const shape = new THREE.Shape(points);
-                    const geom = new THREE.ShapeGeometry(shape, 32);
-                    geom.rotateX(-Math.PI / 2);
-                    
-                    const mat = new THREE.ShaderMaterial({
-                        uniforms: {
-                            time: { value: 0 },
-                            depth: { value: depth },
-                            maxDepth: { value: maxDepth }
-                        },
-                        vertexShader: `
-                            uniform float time;
-                            uniform float depth;
-                            varying vec3 vPos;
-                            varying float vWave;
-                            
-                            void main() {
-                                vPos = position;
-                                vec3 pos = position;
-                                
-                                float wave = sin(pos.x * 0.01 + time) * 0.5 + 
-                                           sin(pos.z * 0.015 - time * 0.8) * 0.4 +
-                                           cos(pos.x * 0.008 - pos.z * 0.012 + time * 0.5) * 0.3;
-                                vWave = wave;
-                                pos.y = depth + wave * 0.8;
-                                
-                                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-                            }
-                        `,
-                        fragmentShader: `
-                            uniform float depth;
-                            uniform float time;
-                            varying vec3 vPos;
-                            varying float vWave;
-                            
-                            vec3 getColor(float d) {
-                                if (d < 0.5) return vec3(0.73, 0.87, 0.98);
-                                if (d < 1.0) return vec3(0.26, 0.65, 0.96);
-                                if (d < 2.0) return vec3(0.10, 0.46, 0.82);
-                                return vec3(0.05, 0.28, 0.63);
-                            }
-                            
-                            void main() {
-                                vec3 col = getColor(depth);
-                                
-                                // Add caustic effect
-                                float caustic = sin(vPos.x * 2.0 + time) * cos(vPos.z * 2.0 - time);
-                                col += vec3(pow(abs(caustic), 0.8) * 0.2);
-                                
-                                // Add foam on edges
-                                float foam = smoothstep(0.0, 0.3, vWave) * 0.3;
-                                col += vec3(foam);
-                                
-                                gl_FragColor = vec4(col, 0.8);
-                            }
-                        `,
-                        transparent: true,
-                        side: THREE.DoubleSide
-                    });
-                    
-                    const mesh = new THREE.Mesh(geom, mat);
-                    scene.add(mesh);
-                    waterMeshes.push(mesh);
-                }
-            });
-        }
-        
-        async function initVR() {
-            if (!isVRSupported) {
-                alert('VR is not supported on this device');
-                return;
-            }
-            
-            document.getElementById('loadingMsg').style.display = 'block';
-            
-            // Create VR scene
-            vrScene = new THREE.Scene();
-            vrScene.background = new THREE.Color(0x87ceeb);
-            
-            // Add fog for depth perception
-            vrScene.fog = new THREE.Fog(0x87ceeb, 50, 500);
-            
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            vrScene.add(ambientLight);
-            
-            const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            sunLight.position.set(200, 300, 200);
-            sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 2048;
-            sunLight.shadow.mapSize.height = 2048;
-            sunLight.shadow.camera.near = 0.5;
-            sunLight.shadow.camera.far = 1000;
-            sunLight.shadow.camera.left = -500;
-            sunLight.shadow.camera.right = 500;
-            sunLight.shadow.camera.top = 500;
-            sunLight.shadow.camera.bottom = -500;
-            vrScene.add(sunLight);
-            
-            const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-            fillLight.position.set(-100, 100, -100);
-            vrScene.add(fillLight);
-            
-            // Create dolly for VR movement
-            dolly = new THREE.Group();
-            dolly.position.set(0, 20, 50); // Start position with good overview
-            vrScene.add(dolly);
-            
-            // Camera group for head tracking
-            cameraGroup = new THREE.Group();
-            dolly.add(cameraGroup);
-            
-            // VR Camera
-            vrCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            cameraGroup.add(vrCamera);
-            
-            // VR Renderer
-            const canvas = document.getElementById('vrCanvas');
-            vrRenderer = new THREE.WebGLRenderer({ 
-                canvas: canvas,
-                antialias: true,
-                alpha: true
-            });
-            vrRenderer.setPixelRatio(window.devicePixelRatio);
-            vrRenderer.setSize(window.innerWidth, window.innerHeight);
-            vrRenderer.xr.enabled = true;
-            vrRenderer.shadowMap.enabled = true;
-            vrRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            
-            // Copy water meshes to VR scene
-            waterMeshes.forEach(mesh => {
-                const clonedGeom = mesh.geometry.clone();
-                const clonedMat = mesh.material.clone();
-                const vrMesh = new THREE.Mesh(clonedGeom, clonedMat);
-                vrScene.add(vrMesh);
-            });
-            
-            // Load MapTiler street tiles as ground texture
-            await loadMapTiles();
-            
-            // Load 3D buildings
-            await load3DBuildings();
-            
-            // Setup controllers
-            setupControllers();
-            
-            // Start VR session
-            try {
-                const session = await navigator.xr.requestSession('immersive-vr', {
-                    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-                });
-                
-                await vrRenderer.xr.setSession(session);
-                
-                document.getElementById('map').style.display = 'none';
-                document.getElementById('ui').style.display = 'none';
-                document.getElementById('vrCanvas').style.display = 'block';
-                document.getElementById('loadingMsg').style.display = 'none';
-                
-                // Start animation loop
-                vrRenderer.setAnimationLoop(renderVR);
-                
-                session.addEventListener('end', onVRSessionEnd);
-            } catch (err) {
-                console.error('Error starting VR session:', err);
-                alert('Failed to start VR: ' + err.message);
-                document.getElementById('loadingMsg').style.display = 'none';
-            }
-        }
-        
-        async function loadMapTiles() {
-            // Calculate tile coordinates for the center point
-            const zoom = 17; // Higher zoom for more detail
-            const tileSize = 512;
-            const metersPerTile = 600; // Approximate scale
-            const lat = CENTER_LAT;
-            const lng = CENTER_LNG;
-            
-            // Convert lat/lng to tile coordinates
-            const n = Math.pow(2, zoom);
-            const xtile = Math.floor((lng + 180) / 360 * n);
-            const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
-            
-            // Load 5x5 grid of tiles for larger area coverage
-            const tilePromises = [];
-            const gridSize = 2; // -2 to +2
-            for (let dx = -gridSize; dx <= gridSize; dx++) {
-                for (let dy = -gridSize; dy <= gridSize; dy++) {
-                    tilePromises.push(loadSingleTile(xtile + dx, ytile + dy, zoom));
-                }
-            }
-            
-            const tiles = await Promise.all(tilePromises);
-            
-            // Create ground with tiles
-            const gridWidth = gridSize * 2 + 1;
-            tiles.forEach((tile, idx) => {
-                if (tile) {
-                    const dx = (idx % gridWidth) - gridSize;
-                    const dy = Math.floor(idx / gridWidth) - gridSize;
-                    
-                    const groundGeom = new THREE.PlaneGeometry(metersPerTile, metersPerTile);
-                    const groundMat = new THREE.MeshStandardMaterial({ 
-                        map: tile,
-                        roughness: 0.85,
-                        metalness: 0.1
-                    });
-                    const ground = new THREE.Mesh(groundGeom, groundMat);
-                    ground.rotation.x = -Math.PI / 2;
-                    ground.position.set(dx * metersPerTile, -0.5, dy * metersPerTile);
-                    ground.receiveShadow = true;
-                    vrScene.add(ground);
-                }
-            });
-        }
-        
-        async function loadSingleTile(x, y, z) {
-            try {
-                // Use MapTiler streets style for the basemap (matches your 2D view)
-                const url = `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${API_KEY}`;
-                
-                const texture = await new Promise((resolve, reject) => {
-                    const loader = new THREE.TextureLoader();
-                    loader.load(
-                        url,
-                        (tex) => {
-                            tex.wrapS = THREE.ClampToEdgeWrapping;
-                            tex.wrapT = THREE.ClampToEdgeWrapping;
-                            tex.minFilter = THREE.LinearFilter;
-                            tex.magFilter = THREE.LinearFilter;
-                            resolve(tex);
-                        },
-                        undefined,
-                        (err) => {
-                            console.error('Error loading tile:', err);
-                            resolve(null);
-                        }
-                    );
-                });
-                
-                return texture;
-            } catch (err) {
-                console.error('Tile load error:', err);
-                return null;
-            }
-        }
-        
-        async function load3DBuildings() {
-            // Fetch building data from MapTiler Vector Tiles
-            const zoom = 16;
-            const lat = CENTER_LAT;
-            const lng = CENTER_LNG;
-            
-            const n = Math.pow(2, zoom);
-            const xtile = Math.floor((lng + 180) / 360 * n);
-            const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
-            
-            try {
-                // Load vector tiles with building data
-                const url = `https://api.maptiler.com/tiles/v3/${zoom}/${xtile}/${ytile}.pbf?key=${API_KEY}`;
-                const response = await fetch(url);
-                
-                if (response.ok) {
-                    // For now, create procedural buildings based on the area
-                    createProceduralBuildings();
-                } else {
-                    createProceduralBuildings();
-                }
-            } catch (err) {
-                console.error('Building load error:', err);
-                createProceduralBuildings();
-            }
-        }
-        
-        function createProceduralBuildings() {
-            // Create realistic 3D buildings matching the area
-            const buildingData = [
-                // Sector 11 area
-                { x: 200, z: -150, w: 30, h: 45, d: 25, color: 0xd4d4d4 },
-                { x: 240, z: -120, w: 25, h: 38, d: 20, color: 0xe0e0e0 },
-                { x: 170, z: -180, w: 35, h: 42, d: 30, color: 0xd8d8d8 },
-                
-                // Om Nagar area
-                { x: -100, z: -80, w: 22, h: 32, d: 18, color: 0xdcdcdc },
-                { x: -130, z: -100, w: 28, h: 35, d: 22, color: 0xe5e5e5 },
-                { x: -70, z: -110, w: 20, h: 28, d: 16, color: 0xd9d9d9 },
-                { x: -150, z: -70, w: 25, h: 30, d: 20, color: 0xe2e2e2 },
-                
-                // Raj Nagar area
-                { x: -200, z: 50, w: 26, h: 36, d: 22, color: 0xdddddd },
-                { x: -180, z: 80, w: 24, h: 33, d: 20, color: 0xe3e3e3 },
-                { x: -230, z: 60, w: 22, h: 29, d: 18, color: 0xd7d7d7 },
-                
-                // Hans Enclave area
-                { x: 0, z: 150, w: 20, h: 25, d: 18, color: 0xe0e0e0 },
-                { x: 30, z: 140, w: 24, h: 28, d: 20, color: 0xdadada },
-                { x: -30, z: 160, w: 22, h: 26, d: 19, color: 0xdfdfdf },
-                { x: 60, z: 170, w: 18, h: 22, d: 16, color: 0xe4e4e4 },
-                
-                // Shivaji Nagar area
-                { x: 250, z: 100, w: 28, h: 34, d: 24, color: 0xd6d6d6 },
-                { x: 220, z: 120, w: 26, h: 31, d: 22, color: 0xdedede },
-                
-                // Additional scattered buildings
-                { x: -50, z: -50, w: 20, h: 30, d: 20, color: 0xe1e1e1 },
-                { x: 30, z: -60, w: 25, h: 40, d: 25, color: 0xd5d5d5 },
-                { x: -70, z: 40, w: 15, h: 25, d: 15, color: 0xe6e6e6 },
-                { x: 50, z: 50, w: 30, h: 35, d: 20, color: 0xdbdbdb },
-                { x: 0, z: -80, w: 20, h: 28, d: 20, color: 0xdcdcdc },
-                { x: -40, z: 70, w: 18, h: 32, d: 18, color: 0xe3e3e3 },
-                { x: 80, z: -30, w: 22, h: 45, d: 22, color: 0xd8d8d8 },
-                { x: -90, z: -20, w: 16, h: 26, d: 16, color: 0xdfdfdf },
-                { x: 120, z: 30, w: 24, h: 38, d: 20, color: 0xe0e0e0 },
-                { x: -120, z: 100, w: 21, h: 29, d: 19, color: 0xd9d9d9 },
-            ];
-            
-            buildingData.forEach(b => {
-                const geom = new THREE.BoxGeometry(b.w, b.h, b.d);
-                const mat = new THREE.MeshStandardMaterial({ 
-                    color: b.color,
-                    roughness: 0.75,
-                    metalness: 0.15
-                });
-                const building = new THREE.Mesh(geom, mat);
-                building.position.set(b.x, b.h / 2, b.z);
-                building.castShadow = true;
-                building.receiveShadow = true;
-                vrScene.add(building);
-                buildings.push(building);
-            });
-        }
-        
-        function createVRBuildings() {
-        }
-
-        function setupControllers() {
-            // Controller 1 (left hand)
-            controller1 = vrRenderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.addEventListener('selectend', onSelectEnd);
-            dolly.add(controller1);
-            
-            // Controller 2 (right hand)
-            controller2 = vrRenderer.xr.getController(1);
-            controller2.addEventListener('selectstart', onSelectStart);
-            controller2.addEventListener('selectend', onSelectEnd);
-            dolly.add(controller2);
-            
-            // Add controller models
-            const geometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 0, -1)
-            ]);
-            
-            const line1 = new THREE.Line(geometry);
-            line1.name = 'line';
-            line1.scale.z = 5;
-            controller1.add(line1.clone());
-            
-            const line2 = new THREE.Line(geometry);
-            line2.name = 'line';
-            line2.scale.z = 5;
-            controller2.add(line2.clone());
-        }
-        
-        let moveSpeed = 0.5;
-        
-        function onSelectStart(event) {
-            const controller = event.target;
-            // Teleport or interaction logic
-        }
-        
-        function onSelectEnd(event) {
-            const controller = event.target;
-        }
-        
-        function handleControllerInput() {
-            const session = vrRenderer.xr.getSession();
-            if (!session) return;
-            
-            for (const source of session.inputSources) {
-                if (source.gamepad) {
-                    const gamepad = source.gamepad;
-                    
-                    // Thumbstick movement
-                    if (gamepad.axes.length >= 2) {
-                        const x = gamepad.axes[2] || 0;
-                        const z = gamepad.axes[3] || 0;
-                        
-                        if (Math.abs(x) > 0.1 || Math.abs(z) > 0.1) {
-                            const direction = new THREE.Vector3(x, 0, -z);
-                            direction.applyQuaternion(dolly.quaternion);
-                            direction.multiplyScalar(moveSpeed);
-                            dolly.position.add(direction);
-                        }
+            // Check WebXR support
+            if (navigator.xr) {
+                navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+                    if (supported) {
+                        console.log('✅ Meta Quest 3 VR ready! Click AR button to enter VR.');
+                    } else {
+                        console.log('⚠️ VR not supported on this device');
                     }
-                    
-                    // Y button for height adjustment (button 4)
-                    if (gamepad.buttons[4] && gamepad.buttons[4].pressed) {
-                        dolly.position.y += 0.3;
-                    }
-                    
-                    // X button for descend (button 5)
-                    if (gamepad.buttons[5] && gamepad.buttons[5].pressed) {
-                        dolly.position.y = Math.max(5, dolly.position.y - 0.3);
-                    }
-                }
+                });
+            } else {
+                console.log('⚠️ WebXR not available');
             }
         }
         
-        function renderVR(time, frame) {
-            handleControllerInput();
-            
-            // Update water animation
-            const t = time * 0.001;
-            vrScene.traverse(obj => {
-                if (obj.material && obj.material.uniforms && obj.material.uniforms.time) {
-                    obj.material.uniforms.time.value = t;
-                }
-            });
-            
-            vrRenderer.render(vrScene, vrCamera);
-        }
+        // Keyboard controls for desktop navigation
+        window.addEventListener('keydown', (e) => {
+            switch(e.key.toLowerCase()) {
+                case 'w': map.panBy([0, -50]); break;
+                case 's': map.panBy([0, 50]); break;
+                case 'a': map.panBy([-50, 0]); break;
+                case 'd': map.panBy([50, 0]); break;
+                case 'q': map.setBearing(map.getBearing() - 10); break;
+                case 'e': map.setBearing(map.getBearing() + 10); break;
+                case '+': 
+                case '=': map.zoomIn(); break;
+                case '-': map.zoomOut(); break;
+                case 'arrowup': map.setPitch(Math.min(85, map.getPitch() + 5)); break;
+                case 'arrowdown': map.setPitch(Math.max(0, map.getPitch() - 5)); break;
+            }
+        });
         
-        function onVRSessionEnd() {
-            document.getElementById('map').style.display = 'block';
-            document.getElementById('ui').style.display = 'block';
-            document.getElementById('vrCanvas').style.display = 'none';
-            vrRenderer.setAnimationLoop(null);
-        }
-        
-        // Handle window resize
+        // Handle resize
         window.addEventListener('resize', () => {
-            if (vrRenderer) {
-                vrRenderer.setSize(window.innerWidth, window.innerHeight);
-                if (vrCamera) {
-                    vrCamera.aspect = window.innerWidth / window.innerHeight;
-                    vrCamera.updateProjectionMatrix();
-                }
-            }
+            map.resize();
         });
     </script>
 </body>
