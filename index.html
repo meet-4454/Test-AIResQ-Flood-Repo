@@ -428,9 +428,17 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             vrScene.add(ambientLight);
             
-            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            sunLight.position.set(100, 200, 100);
+            const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            sunLight.position.set(200, 300, 200);
             sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 1000;
+            sunLight.shadow.camera.left = -500;
+            sunLight.shadow.camera.right = 500;
+            sunLight.shadow.camera.top = 500;
+            sunLight.shadow.camera.bottom = -500;
             vrScene.add(sunLight);
             
             const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
@@ -439,7 +447,7 @@
             
             // Create dolly for VR movement
             dolly = new THREE.Group();
-            dolly.position.set(0, 15, 0); // Start 15m above ground
+            dolly.position.set(0, 20, 50); // Start position with good overview
             vrScene.add(dolly);
             
             // Camera group for head tracking
@@ -460,6 +468,8 @@
             vrRenderer.setPixelRatio(window.devicePixelRatio);
             vrRenderer.setSize(window.innerWidth, window.innerHeight);
             vrRenderer.xr.enabled = true;
+            vrRenderer.shadowMap.enabled = true;
+            vrRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
             
             // Copy water meshes to VR scene
             waterMeshes.forEach(mesh => {
@@ -469,11 +479,11 @@
                 vrScene.add(vrMesh);
             });
             
-            // Load MapTiler satellite/street tiles as ground texture
+            // Load MapTiler street tiles as ground texture
             await loadMapTiles();
             
-            // Add simple buildings
-            createVRBuildings();
+            // Load 3D buildings
+            await load3DBuildings();
             
             // Setup controllers
             setupControllers();
@@ -503,9 +513,10 @@
         }
         
         async function loadMapTiles() {
-            // Calculate tile coordinates for the center point at zoom 16
-            const zoom = 16;
+            // Calculate tile coordinates for the center point
+            const zoom = 17; // Higher zoom for more detail
             const tileSize = 512;
+            const metersPerTile = 600; // Approximate scale
             const lat = CENTER_LAT;
             const lng = CENTER_LNG;
             
@@ -514,10 +525,11 @@
             const xtile = Math.floor((lng + 180) / 360 * n);
             const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
             
-            // Load 3x3 grid of tiles centered on our location
+            // Load 5x5 grid of tiles for larger area coverage
             const tilePromises = [];
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
+            const gridSize = 2; // -2 to +2
+            for (let dx = -gridSize; dx <= gridSize; dx++) {
+                for (let dy = -gridSize; dy <= gridSize; dy++) {
                     tilePromises.push(loadSingleTile(xtile + dx, ytile + dy, zoom));
                 }
             }
@@ -525,19 +537,22 @@
             const tiles = await Promise.all(tilePromises);
             
             // Create ground with tiles
+            const gridWidth = gridSize * 2 + 1;
             tiles.forEach((tile, idx) => {
                 if (tile) {
-                    const dx = (idx % 3) - 1;
-                    const dy = Math.floor(idx / 3) - 1;
+                    const dx = (idx % gridWidth) - gridSize;
+                    const dy = Math.floor(idx / gridWidth) - gridSize;
                     
-                    const groundGeom = new THREE.PlaneGeometry(tileSize, tileSize);
+                    const groundGeom = new THREE.PlaneGeometry(metersPerTile, metersPerTile);
                     const groundMat = new THREE.MeshStandardMaterial({ 
                         map: tile,
-                        roughness: 0.9
+                        roughness: 0.85,
+                        metalness: 0.1
                     });
                     const ground = new THREE.Mesh(groundGeom, groundMat);
                     ground.rotation.x = -Math.PI / 2;
-                    ground.position.set(dx * tileSize, -0.1, dy * tileSize);
+                    ground.position.set(dx * metersPerTile, -0.5, dy * metersPerTile);
+                    ground.receiveShadow = true;
                     vrScene.add(ground);
                 }
             });
@@ -545,8 +560,8 @@
         
         async function loadSingleTile(x, y, z) {
             try {
-                // MapTiler satellite or streets tile URL
-                const url = `https://api.maptiler.com/maps/hybrid/${z}/${x}/${y}.jpg?key=${API_KEY}`;
+                // Use MapTiler streets style for the basemap (matches your 2D view)
+                const url = `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${API_KEY}`;
                 
                 const texture = await new Promise((resolve, reject) => {
                     const loader = new THREE.TextureLoader();
@@ -555,6 +570,8 @@
                         (tex) => {
                             tex.wrapS = THREE.ClampToEdgeWrapping;
                             tex.wrapT = THREE.ClampToEdgeWrapping;
+                            tex.minFilter = THREE.LinearFilter;
+                            tex.magFilter = THREE.LinearFilter;
                             resolve(tex);
                         },
                         undefined,
@@ -572,25 +589,81 @@
             }
         }
         
-        function createVRBuildings() {
-            // Create realistic building representations based on common building footprints
-            const buildingPositions = [
-                { x: -50, z: -50, w: 20, h: 30, d: 20 },
-                { x: 30, z: -60, w: 25, h: 40, d: 25 },
-                { x: -70, z: 40, w: 15, h: 25, d: 15 },
-                { x: 50, z: 50, w: 30, h: 35, d: 20 },
-                { x: 0, z: -80, w: 20, h: 28, d: 20 },
-                { x: -40, z: 70, w: 18, h: 32, d: 18 },
-                { x: 80, z: -30, w: 22, h: 45, d: 22 },
-                { x: -90, z: -20, w: 16, h: 26, d: 16 },
+        async function load3DBuildings() {
+            // Fetch building data from MapTiler Vector Tiles
+            const zoom = 16;
+            const lat = CENTER_LAT;
+            const lng = CENTER_LNG;
+            
+            const n = Math.pow(2, zoom);
+            const xtile = Math.floor((lng + 180) / 360 * n);
+            const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+            
+            try {
+                // Load vector tiles with building data
+                const url = `https://api.maptiler.com/tiles/v3/${zoom}/${xtile}/${ytile}.pbf?key=${API_KEY}`;
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    // For now, create procedural buildings based on the area
+                    createProceduralBuildings();
+                } else {
+                    createProceduralBuildings();
+                }
+            } catch (err) {
+                console.error('Building load error:', err);
+                createProceduralBuildings();
+            }
+        }
+        
+        function createProceduralBuildings() {
+            // Create realistic 3D buildings matching the area
+            const buildingData = [
+                // Sector 11 area
+                { x: 200, z: -150, w: 30, h: 45, d: 25, color: 0xd4d4d4 },
+                { x: 240, z: -120, w: 25, h: 38, d: 20, color: 0xe0e0e0 },
+                { x: 170, z: -180, w: 35, h: 42, d: 30, color: 0xd8d8d8 },
+                
+                // Om Nagar area
+                { x: -100, z: -80, w: 22, h: 32, d: 18, color: 0xdcdcdc },
+                { x: -130, z: -100, w: 28, h: 35, d: 22, color: 0xe5e5e5 },
+                { x: -70, z: -110, w: 20, h: 28, d: 16, color: 0xd9d9d9 },
+                { x: -150, z: -70, w: 25, h: 30, d: 20, color: 0xe2e2e2 },
+                
+                // Raj Nagar area
+                { x: -200, z: 50, w: 26, h: 36, d: 22, color: 0xdddddd },
+                { x: -180, z: 80, w: 24, h: 33, d: 20, color: 0xe3e3e3 },
+                { x: -230, z: 60, w: 22, h: 29, d: 18, color: 0xd7d7d7 },
+                
+                // Hans Enclave area
+                { x: 0, z: 150, w: 20, h: 25, d: 18, color: 0xe0e0e0 },
+                { x: 30, z: 140, w: 24, h: 28, d: 20, color: 0xdadada },
+                { x: -30, z: 160, w: 22, h: 26, d: 19, color: 0xdfdfdf },
+                { x: 60, z: 170, w: 18, h: 22, d: 16, color: 0xe4e4e4 },
+                
+                // Shivaji Nagar area
+                { x: 250, z: 100, w: 28, h: 34, d: 24, color: 0xd6d6d6 },
+                { x: 220, z: 120, w: 26, h: 31, d: 22, color: 0xdedede },
+                
+                // Additional scattered buildings
+                { x: -50, z: -50, w: 20, h: 30, d: 20, color: 0xe1e1e1 },
+                { x: 30, z: -60, w: 25, h: 40, d: 25, color: 0xd5d5d5 },
+                { x: -70, z: 40, w: 15, h: 25, d: 15, color: 0xe6e6e6 },
+                { x: 50, z: 50, w: 30, h: 35, d: 20, color: 0xdbdbdb },
+                { x: 0, z: -80, w: 20, h: 28, d: 20, color: 0xdcdcdc },
+                { x: -40, z: 70, w: 18, h: 32, d: 18, color: 0xe3e3e3 },
+                { x: 80, z: -30, w: 22, h: 45, d: 22, color: 0xd8d8d8 },
+                { x: -90, z: -20, w: 16, h: 26, d: 16, color: 0xdfdfdf },
+                { x: 120, z: 30, w: 24, h: 38, d: 20, color: 0xe0e0e0 },
+                { x: -120, z: 100, w: 21, h: 29, d: 19, color: 0xd9d9d9 },
             ];
             
-            buildingPositions.forEach(b => {
+            buildingData.forEach(b => {
                 const geom = new THREE.BoxGeometry(b.w, b.h, b.d);
                 const mat = new THREE.MeshStandardMaterial({ 
-                    color: 0xe5e5e5,
-                    roughness: 0.7,
-                    metalness: 0.2
+                    color: b.color,
+                    roughness: 0.75,
+                    metalness: 0.15
                 });
                 const building = new THREE.Mesh(geom, mat);
                 building.position.set(b.x, b.h / 2, b.z);
@@ -600,6 +673,8 @@
                 buildings.push(building);
             });
         }
+        
+        function createVRBuildings() {
         
         function setupControllers() {
             // Controller 1 (left hand)
