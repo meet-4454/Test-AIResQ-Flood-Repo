@@ -4,17 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VR Flood Visualization - Meta Quest 3</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
+    <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
     <style>
         body { 
             margin: 0; 
             padding: 0; 
             overflow: hidden; 
             font-family: Arial, sans-serif;
-            background: #000;
         }
-        
-        #container { 
+        #map { 
             width: 100vw; 
             height: 100vh; 
         }
@@ -86,23 +85,15 @@
             border-left: 4px solid #f59e0b;
         }
 
-        .controls {
-            margin-top: 12px;
-            padding: 12px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            font-size: 11px;
-        }
-
-        .controls strong {
+        .vr-info strong {
             display: block;
             margin-bottom: 6px;
-            color: #374151;
+            color: #92400e;
         }
     </style>
 </head>
 <body>
-    <div id="container"></div>
+    <div id="map"></div>
     
     <div id="ui">
         <h3>🌊 VR Flood Visualization</h3>
@@ -126,94 +117,94 @@
             &gt; 2 m depth
         </div>
         <button id="vrButton" disabled>Checking VR Support...</button>
-        <div class="controls">
-            <strong>🖱️ Desktop Controls:</strong>
-            Mouse drag: Rotate | Scroll: Zoom<br>
-            Arrow keys: Move camera
-        </div>
         <div class="vr-info">
-            <strong>🥽 VR Controls:</strong>
-            Head movement: Look around<br>
-            Thumbsticks: Navigate scene
+            <strong>🎮 Quest 3 Controllers:</strong>
+            <strong>Left Thumbstick:</strong> Move forward/back, strafe left/right<br>
+            <strong>Right Thumbstick:</strong> Rotate view, adjust height<br>
+            <strong>Triggers:</strong> Teleport to pointed location<br>
+            <strong>Grip Buttons:</strong> Reset position<br>
+            <strong>A/X Buttons:</strong> Zoom in/out
         </div>
     </div>
 
     <script>
+        const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
         const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
         const CENTER_LNG = 77.027;
         const CENTER_LAT = 28.448;
         
-        let scene, camera, renderer, controls;
-        let waterMeshes = [];
-        let buildings = [];
-        let ground;
+        let map;
         
-        // Initialize Three.js scene
-        function init() {
-            // Scene
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb);
-            
-            // Camera
-            camera = new THREE.PerspectiveCamera(
-                75,
-                window.innerWidth / window.innerHeight,
-                0.1,
-                2000
-            );
-            camera.position.set(0, 50, 100);
-            camera.lookAt(0, 0, 0);
-            
-            // Renderer
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.xr.enabled = true;
-            document.getElementById('container').appendChild(renderer.domElement);
-            
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
-            
-            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            sunLight.position.set(100, 200, 100);
-            scene.add(sunLight);
-            
-            // Ground plane
-            const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
-            const groundMaterial = new THREE.MeshStandardMaterial({ 
-                color: 0xd4d4d4,
-                roughness: 0.8
+        maptilersdk.config.apiKey = API_KEY;
+        
+        // Initialize map with MapTiler Streets basemap
+        map = new maptilersdk.Map({
+            container: 'map',
+            style: maptilersdk.MapStyle.STREETS,
+            center: [CENTER_LNG, CENTER_LAT],
+            zoom: 16,
+            pitch: 60,
+            bearing: -20,
+            antialias: true,
+            hash: false
+        });
+        
+        map.on('load', () => {
+            // Add terrain for elevation
+            map.addSource('terrain', {
+                type: 'raster-dem',
+                url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${API_KEY}`,
+                tileSize: 256
             });
-            ground = new THREE.Mesh(groundGeometry, groundMaterial);
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.y = -0.5;
-            scene.add(ground);
             
-            // Add grid for reference
-            const gridHelper = new THREE.GridHelper(2000, 100, 0x888888, 0xcccccc);
-            gridHelper.position.y = -0.4;
-            scene.add(gridHelper);
+            map.setTerrain({
+                source: 'terrain',
+                exaggeration: 1.5
+            });
             
-            // Load data
+            // Add MapTiler vector tiles source for buildings
+            map.addSource('openmaptiles', {
+                type: 'vector',
+                url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${API_KEY}`
+            });
+            
+            // Add 3D buildings layer (extruded)
+            map.addLayer({
+                'id': '3d-buildings',
+                'source': 'openmaptiles',
+                'source-layer': 'building',
+                'type': 'fill-extrusion',
+                'minzoom': 14,
+                'paint': {
+                    'fill-extrusion-color': '#e0e0e0',
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['coalesce', ['get', 'render_height'], 5]
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['coalesce', ['get', 'render_min_height'], 0]
+                    ],
+                    'fill-extrusion-opacity': 0.9
+                }
+            });
+            
+            // Load flood data
             loadFloodData();
-            createBuildings();
             
-            // Check VR support
-            checkVRSupport();
-            
-            // Mouse controls for desktop
-            setupMouseControls();
-            
-            // Keyboard controls
-            setupKeyboardControls();
-            
-            // Start rendering
-            renderer.setAnimationLoop(animate);
-            
-            // Handle resize
-            window.addEventListener('resize', onWindowResize);
-        }
+            // Setup VR with controller support
+            setupVRWithControllers();
+        });
         
         async function loadFloodData() {
             try {
@@ -221,58 +212,38 @@
                 if (!res.ok) throw new Error('Flood data file not found');
                 const data = await res.json();
                 
-                let maxDepth = 0;
+                // Add flood data as GeoJSON source
+                map.addSource('flood-data', {
+                    type: 'geojson',
+                    data: data
+                });
                 
-                data.features.forEach(f => {
-                    if (!f.geometry || !f.properties) return;
-                    const depth = parseFloat(f.properties.value);
-                    if (isNaN(depth) || depth <= 0) return;
-                    maxDepth = Math.max(maxDepth, depth);
-                    
-                    if (f.geometry.type === 'Polygon') {
-                        const coords = f.geometry.coordinates[0];
-                        
-                        // Convert lat/lng to local coordinates
-                        const points = coords.map(c => {
-                            const x = (c[0] - CENTER_LNG) * 111320 * Math.cos(CENTER_LAT * Math.PI / 180);
-                            const z = -(c[1] - CENTER_LAT) * 110540;
-                            return new THREE.Vector2(x, z);
-                        });
-                        
-                        if (points.length < 3) return;
-                        
-                        // Create extruded water shape
-                        const shape = new THREE.Shape(points);
-                        const extrudeSettings = {
-                            depth: depth,
-                            bevelEnabled: false
-                        };
-                        
-                        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                        geometry.rotateX(-Math.PI / 2);
-                        
-                        // Color based on depth
-                        let color;
-                        if (depth < 0.5) color = 0xbbdefb;
-                        else if (depth < 1.0) color = 0x42a5f5;
-                        else if (depth < 2.0) color = 0x1976d2;
-                        else color = 0x0d47a1;
-                        
-                        const material = new THREE.MeshStandardMaterial({
-                            color: color,
-                            transparent: true,
-                            opacity: 0.7,
-                            roughness: 0.3,
-                            metalness: 0.1
-                        });
-                        
-                        const mesh = new THREE.Mesh(geometry, material);
-                        scene.add(mesh);
-                        waterMeshes.push(mesh);
+                // Add extruded water layer
+                map.addLayer({
+                    'id': 'flood-water-3d',
+                    'type': 'fill-extrusion',
+                    'source': 'flood-data',
+                    'paint': {
+                        'fill-extrusion-color': [
+                            'interpolate',
+                            ['linear'],
+                            ['get', 'value'],
+                            0, '#bbdefb',
+                            0.5, '#42a5f5',
+                            1.0, '#1976d2',
+                            2.0, '#0d47a1'
+                        ],
+                        'fill-extrusion-height': [
+                            '*',
+                            ['get', 'value'],
+                            1
+                        ],
+                        'fill-extrusion-base': 0,
+                        'fill-extrusion-opacity': 0.7
                     }
                 });
                 
-                console.log(`Loaded ${waterMeshes.length} water meshes`);
+                console.log('Flood layer loaded successfully');
                 
             } catch (err) {
                 console.error('Error loading flood data:', err);
@@ -280,145 +251,19 @@
             }
         }
         
-        function createBuildings() {
-            // Create buildings based on the area
-            const buildingData = [
-                // Sector 11 area
-                { x: 200, z: -150, w: 30, h: 45, d: 25 },
-                { x: 240, z: -120, w: 25, h: 38, d: 20 },
-                { x: 170, z: -180, w: 35, h: 42, d: 30 },
-                
-                // Om Nagar area
-                { x: -100, z: -80, w: 22, h: 32, d: 18 },
-                { x: -130, z: -100, w: 28, h: 35, d: 22 },
-                { x: -70, z: -110, w: 20, h: 28, d: 16 },
-                { x: -150, z: -70, w: 25, h: 30, d: 20 },
-                
-                // Raj Nagar area
-                { x: -200, z: 50, w: 26, h: 36, d: 22 },
-                { x: -180, z: 80, w: 24, h: 33, d: 20 },
-                { x: -230, z: 60, w: 22, h: 29, d: 18 },
-                
-                // Hans Enclave area
-                { x: 0, z: 150, w: 20, h: 25, d: 18 },
-                { x: 30, z: 140, w: 24, h: 28, d: 20 },
-                { x: -30, z: 160, w: 22, h: 26, d: 19 },
-                { x: 60, z: 170, w: 18, h: 22, d: 16 },
-                
-                // Additional buildings
-                { x: -50, z: -50, w: 20, h: 30, d: 20 },
-                { x: 30, z: -60, w: 25, h: 40, d: 25 },
-                { x: -70, z: 40, w: 15, h: 25, d: 15 },
-                { x: 50, z: 50, w: 30, h: 35, d: 20 },
-                { x: 80, z: -30, w: 22, h: 45, d: 22 },
-                { x: -90, z: -20, w: 16, h: 26, d: 16 },
-                { x: 120, z: 30, w: 24, h: 38, d: 20 },
-            ];
-            
-            buildingData.forEach(b => {
-                const geometry = new THREE.BoxGeometry(b.w, b.h, b.d);
-                const material = new THREE.MeshStandardMaterial({ 
-                    color: 0xe0e0e0,
-                    roughness: 0.7,
-                    metalness: 0.2
-                });
-                const building = new THREE.Mesh(geometry, material);
-                building.position.set(b.x, b.h / 2, b.z);
-                scene.add(building);
-                buildings.push(building);
-            });
-            
-            console.log(`Created ${buildings.length} buildings`);
-        }
+        let arControl;
+        let controllerInputs = {
+            moveX: 0,
+            moveZ: 0,
+            rotate: 0,
+            zoom: 0,
+            height: 0
+        };
         
-        let mouseDown = false;
-        let mouseX = 0, mouseY = 0;
-        let cameraRotation = { theta: 0, phi: 45 };
-        let cameraDistance = 150;
-        
-        function setupMouseControls() {
-            const container = document.getElementById('container');
-            
-            container.addEventListener('mousedown', (e) => {
-                mouseDown = true;
-                mouseX = e.clientX;
-                mouseY = e.clientY;
-            });
-            
-            container.addEventListener('mouseup', () => {
-                mouseDown = false;
-            });
-            
-            container.addEventListener('mousemove', (e) => {
-                if (!mouseDown) return;
-                
-                const deltaX = e.clientX - mouseX;
-                const deltaY = e.clientY - mouseY;
-                
-                cameraRotation.theta += deltaX * 0.3;
-                cameraRotation.phi = Math.max(5, Math.min(85, cameraRotation.phi + deltaY * 0.3));
-                
-                mouseX = e.clientX;
-                mouseY = e.clientY;
-                
-                updateCameraPosition();
-            });
-            
-            container.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                cameraDistance = Math.max(50, Math.min(500, cameraDistance + e.deltaY * 0.1));
-                updateCameraPosition();
-            });
-        }
-        
-        function updateCameraPosition() {
-            const theta = cameraRotation.theta * Math.PI / 180;
-            const phi = cameraRotation.phi * Math.PI / 180;
-            
-            camera.position.x = cameraDistance * Math.sin(phi) * Math.sin(theta);
-            camera.position.y = cameraDistance * Math.cos(phi);
-            camera.position.z = cameraDistance * Math.sin(phi) * Math.cos(theta);
-            
-            camera.lookAt(0, 0, 0);
-        }
-        
-        const keys = {};
-        function setupKeyboardControls() {
-            window.addEventListener('keydown', (e) => {
-                keys[e.key.toLowerCase()] = true;
-            });
-            
-            window.addEventListener('keyup', (e) => {
-                keys[e.key.toLowerCase()] = false;
-            });
-        }
-        
-        function handleKeyboardInput() {
-            const moveSpeed = 2;
-            
-            if (keys['arrowup'] || keys['w']) {
-                camera.position.z -= moveSpeed;
-            }
-            if (keys['arrowdown'] || keys['s']) {
-                camera.position.z += moveSpeed;
-            }
-            if (keys['arrowleft'] || keys['a']) {
-                camera.position.x -= moveSpeed;
-            }
-            if (keys['arrowright'] || keys['d']) {
-                camera.position.x += moveSpeed;
-            }
-            if (keys[' ']) {
-                camera.position.y += moveSpeed;
-            }
-            if (keys['shift']) {
-                camera.position.y = Math.max(5, camera.position.y - moveSpeed);
-            }
-        }
-        
-        async function checkVRSupport() {
+        async function setupVRWithControllers() {
             const vrButton = document.getElementById('vrButton');
             
+            // Check VR support
             if (!navigator.xr) {
                 vrButton.textContent = '⚠️ WebXR Not Available';
                 vrButton.disabled = true;
@@ -431,8 +276,33 @@
                 if (supported) {
                     vrButton.textContent = '🥽 Enter VR Mode';
                     vrButton.disabled = false;
-                    vrButton.onclick = enterVR;
-                    console.log('✅ VR ready!');
+                    
+                    // Add MapTiler's AR control (it supports VR)
+                    arControl = new maptilersdk.ARControl();
+                    map.addControl(arControl, 'bottom-right');
+                    
+                    // Hide the default button, use custom one
+                    setTimeout(() => {
+                        const arButtons = document.querySelectorAll('.maplibregl-ctrl-ar button, .maptiler-ar-control button');
+                        arButtons.forEach(btn => btn.style.display = 'none');
+                    }, 100);
+                    
+                    // Custom button triggers AR control + starts controller monitoring
+                    vrButton.onclick = async () => {
+                        const arButtons = document.querySelectorAll('.maplibregl-ctrl-ar button, .maptiler-ar-control button');
+                        if (arButtons.length > 0) {
+                            arButtons[0].click();
+                            
+                            // Start monitoring controllers after a short delay
+                            setTimeout(() => {
+                                startControllerMonitoring();
+                            }, 1000);
+                            
+                            document.getElementById('ui').style.display = 'none';
+                        }
+                    };
+                    
+                    console.log('✅ VR ready with controller support!');
                 } else {
                     vrButton.textContent = '⚠️ VR Not Supported';
                     vrButton.disabled = true;
@@ -444,49 +314,151 @@
             }
         }
         
-        async function enterVR() {
-            const vrButton = document.getElementById('vrButton');
+        function startControllerMonitoring() {
+            // Monitor XR input sources for controller input
+            if (!navigator.xr) return;
             
-            try {
-                vrButton.textContent = 'Starting VR...';
+            // Request animation frame to continuously check controller inputs
+            function checkControllers() {
+                // Try to access XR session through the renderer
+                try {
+                    const session = renderer?.xr?.getSession?.();
+                    if (!session) {
+                        requestAnimationFrame(checkControllers);
+                        return;
+                    }
+                    
+                    // Process controller inputs
+                    for (const source of session.inputSources) {
+                        if (source.gamepad) {
+                            processGamepadInput(source.gamepad, source.handedness);
+                        }
+                    }
+                    
+                    // Apply movements to map
+                    applyControllerMovements();
+                    
+                    requestAnimationFrame(checkControllers);
+                } catch (err) {
+                    // Session might not be available yet
+                    requestAnimationFrame(checkControllers);
+                }
+            }
+            
+            checkControllers();
+        }
+        
+        function processGamepadInput(gamepad, hand) {
+            // Left controller (move)
+            if (hand === 'left' && gamepad.axes.length >= 4) {
+                controllerInputs.moveX = gamepad.axes[2]; // Left/right
+                controllerInputs.moveZ = gamepad.axes[3]; // Forward/back
+            }
+            
+            // Right controller (rotate & height)
+            if (hand === 'right' && gamepad.axes.length >= 4) {
+                controllerInputs.rotate = gamepad.axes[2]; // Rotation
+                controllerInputs.height = -gamepad.axes[3]; // Height (inverted)
+            }
+            
+            // Buttons for zoom
+            if (gamepad.buttons.length > 0) {
+                // A button (index 4) - zoom in
+                if (gamepad.buttons[4]?.pressed) {
+                    controllerInputs.zoom = 0.1;
+                }
+                // X button (index 5) - zoom out
+                else if (gamepad.buttons[5]?.pressed) {
+                    controllerInputs.zoom = -0.1;
+                }
+                else {
+                    controllerInputs.zoom = 0;
+                }
                 
-                const session = await navigator.xr.requestSession('immersive-vr', {
-                    optionalFeatures: ['local-floor', 'bounded-floor']
-                });
+                // Grip buttons (index 1) - reset view
+                if (gamepad.buttons[1]?.pressed) {
+                    map.flyTo({
+                        center: [CENTER_LNG, CENTER_LAT],
+                        zoom: 16,
+                        pitch: 60,
+                        bearing: -20
+                    });
+                }
                 
-                await renderer.xr.setSession(session);
-                
-                vrButton.textContent = '🥽 VR Active';
-                document.getElementById('ui').style.display = 'none';
-                
-                session.addEventListener('end', () => {
-                    vrButton.textContent = '🥽 Enter VR Mode';
-                    document.getElementById('ui').style.display = 'block';
-                    console.log('VR session ended');
-                });
-                
-                console.log('✅ Entered VR mode!');
-                
-            } catch (err) {
-                console.error('VR error:', err);
-                alert('Failed to enter VR: ' + err.message);
-                vrButton.textContent = '🥽 Enter VR Mode';
+                // Trigger (index 0) - could be used for teleport or other interactions
+                if (gamepad.buttons[0]?.pressed) {
+                    // Teleport functionality could be added here
+                    console.log('Trigger pressed on', hand, 'controller');
+                }
             }
         }
         
-        function animate() {
-            handleKeyboardInput();
-            renderer.render(scene, camera);
+        function applyControllerMovements() {
+            const threshold = 0.1;
+            const moveSpeed = 0.0001; // Adjust for map units
+            const rotateSpeed = 2;
+            const pitchSpeed = 2;
+            
+            // Get current map state
+            const center = map.getCenter();
+            const bearing = map.getBearing();
+            const pitch = map.getPitch();
+            const zoom = map.getZoom();
+            
+            // Apply movement (left thumbstick)
+            if (Math.abs(controllerInputs.moveX) > threshold || Math.abs(controllerInputs.moveZ) > threshold) {
+                // Convert to lat/lng movement considering current bearing
+                const bearingRad = bearing * Math.PI / 180;
+                const deltaLng = (controllerInputs.moveX * Math.cos(bearingRad) - controllerInputs.moveZ * Math.sin(bearingRad)) * moveSpeed;
+                const deltaLat = (controllerInputs.moveX * Math.sin(bearingRad) + controllerInputs.moveZ * Math.cos(bearingRad)) * moveSpeed;
+                
+                map.setCenter([
+                    center.lng + deltaLng,
+                    center.lat + deltaLat
+                ]);
+            }
+            
+            // Apply rotation (right thumbstick horizontal)
+            if (Math.abs(controllerInputs.rotate) > threshold) {
+                map.setBearing(bearing + controllerInputs.rotate * rotateSpeed);
+            }
+            
+            // Apply pitch/height (right thumbstick vertical)
+            if (Math.abs(controllerInputs.height) > threshold) {
+                const newPitch = Math.max(0, Math.min(85, pitch + controllerInputs.height * pitchSpeed));
+                map.setPitch(newPitch);
+            }
+            
+            // Apply zoom (A/X buttons)
+            if (Math.abs(controllerInputs.zoom) > 0.01) {
+                map.setZoom(zoom + controllerInputs.zoom);
+            }
         }
         
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        // Desktop keyboard controls
+        window.addEventListener('keydown', (e) => {
+            const moveAmount = 0.001;
+            const center = map.getCenter();
+            
+            switch(e.key.toLowerCase()) {
+                case 'w': map.setCenter([center.lng, center.lat + moveAmount]); break;
+                case 's': map.setCenter([center.lng, center.lat - moveAmount]); break;
+                case 'a': map.setCenter([center.lng - moveAmount, center.lat]); break;
+                case 'd': map.setCenter([center.lng + moveAmount, center.lat]); break;
+                case 'q': map.setBearing(map.getBearing() - 10); break;
+                case 'e': map.setBearing(map.getBearing() + 10); break;
+                case '+': 
+                case '=': map.zoomIn(); break;
+                case '-': map.zoomOut(); break;
+                case 'arrowup': map.setPitch(Math.min(85, map.getPitch() + 5)); break;
+                case 'arrowdown': map.setPitch(Math.max(0, map.getPitch() - 5)); break;
+            }
+        });
         
-        // Start the app
-        init();
+        // Resize handler
+        window.addEventListener('resize', () => {
+            map.resize();
+        });
     </script>
 </body>
 </html>
