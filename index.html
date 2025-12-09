@@ -12,7 +12,6 @@
             padding: 0; 
             overflow: hidden; 
             font-family: Arial, sans-serif;
-            background: #000;
         }
         #map { 
             width: 100vw; 
@@ -59,84 +58,31 @@
             font-size: 11px;
             border-left: 4px solid #f59e0b;
         }
-        
-        #enter-vr-btn {
+
+        #vrButton {
+            width: 100%;
+            padding: 16px;
             margin-top: 15px;
-            padding: 10px 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
             border: none;
             border-radius: 8px;
-            font-weight: bold;
             cursor: pointer;
-            display: none;
-            width: 100%;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         }
         
-        #enter-vr-btn:hover {
-            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        #vrButton:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
         }
-        
-        #enter-vr-btn.loading {
-            background: #6b7280;
-            cursor: wait;
-        }
-        
-        #loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            color: white;
-            font-size: 24px;
-            flex-direction: column;
-        }
-        
-        .spinner {
-            border: 8px solid #f3f3f3;
-            border-top: 8px solid #3498db;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            animation: spin 2s linear infinite;
-            margin-bottom: 20px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        #vr-status {
-            margin-top: 10px;
-            font-size: 12px;
-            padding: 8px;
-            border-radius: 6px;
-            text-align: center;
-        }
-        
-        .vr-active {
-            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
-            color: #065f46;
-            border: 2px solid #10b981;
-        }
-        
-        .vr-available {
-            background: linear-gradient(135deg, #fef3c7, #fde68a);
-            color: #92400e;
-            border: 2px solid #f59e0b;
-        }
-        
-        .vr-unavailable {
-            background: #f3f4f6;
-            color: #6b7280;
-            border: 2px solid #d1d5db;
+
+        #vrButton:disabled { 
+            background: #999; 
+            cursor: not-allowed; 
+            transform: none;
         }
     </style>
 </head>
@@ -164,25 +110,11 @@
             <div class="legend-color" style="background:#0d47a1;"></div>
             &gt; 2 m depth
         </div>
-        
-        <button id="enter-vr-btn">🥽 ENTER VR MODE</button>
-        <div id="vr-status" class="vr-unavailable">Checking VR support...</div>
-        
+        <button id="vrButton" disabled>Checking VR Support...</button>
         <div class="vr-info">
-            <strong>Meta Quest 3 Instructions:</strong>
-            <ol style="margin: 8px 0; padding-left: 20px;">
-                <li>Click "ENTER VR MODE" button above</li>
-                <li>Allow VR permission when prompted</li>
-                <li>Use controller thumbsticks to move</li>
-                <li>Press Menu button to exit VR</li>
-            </ol>
+            <strong>🥽 VR Controls (Meta Quest 3):</strong>
+            Look around with head movement, navigate with thumbsticks
         </div>
-    </div>
-    
-    <div id="loading-overlay">
-        <div class="spinner"></div>
-        <div id="loading-text">Loading VR Experience...</div>
-        <div id="loading-progress" style="font-size: 14px; margin-top: 10px;"></div>
     </div>
 
     <script>
@@ -192,316 +124,193 @@
         const CENTER_LAT = 28.448;
         
         let map;
-        let vrSupported = false;
-        let vrSession = null;
-        let floodData = null;
-        let loadingProgress = 0;
+        let xrSession = null;
         
         maptilersdk.config.apiKey = API_KEY;
         
-        // Pre-load critical assets before map initialization
-        async function preloadAssets() {
-            showLoading('Preparing VR experience...');
+        // Initialize map with the exact style you want
+        map = new maptilersdk.Map({
+            container: 'map',
+            style: maptilersdk.MapStyle.STREETS, // Clean streets basemap
+            center: [CENTER_LNG, CENTER_LAT],
+            zoom: 16,
+            pitch: 60,
+            bearing: -20,
+            antialias: true,
+            hash: false
+        });
+        
+        map.on('load', () => {
+            // Add terrain for natural elevation
+            map.addSource('terrain', {
+                type: 'raster-dem',
+                url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${API_KEY}`,
+                tileSize: 256
+            });
             
+            map.setTerrain({
+                source: 'terrain',
+                exaggeration: 1.5
+            });
+            
+            // Add 3D buildings - extruded
+            map.addLayer({
+                'id': '3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 14,
+                'paint': {
+                    'fill-extrusion-color': '#e0e0e0',
+                    'fill-extrusion-height': ['get', 'height'],
+                    'fill-extrusion-base': ['get', 'min_height'],
+                    'fill-extrusion-opacity': 0.9
+                }
+            });
+            
+            // Load and add flood water as extruded layer
+            loadFloodData();
+            
+            // Check VR support and setup button
+            checkVRSupport();
+        });
+        
+        async function loadFloodData() {
             try {
-                // 1. Load flood data first (biggest asset)
-                updateProgress('Loading flood data...', 20);
                 const res = await fetch(GEOJSON_FILE);
                 if (!res.ok) throw new Error('Flood data file not found');
-                floodData = await res.json();
+                const data = await res.json();
                 
-                // 2. Optimize flood data - simplify if too complex
-                updateProgress('Optimizing data...', 40);
-                if (floodData.features && floodData.features.length > 1000) {
-                    console.log(`Original features: ${floodData.features.length}`);
-                    // Keep only every 2nd feature for VR to improve performance
-                    floodData.features = floodData.features.filter((_, index) => index % 2 === 0);
-                    console.log(`Reduced to: ${floodData.features.length} features for VR`);
-                }
-                
-                updateProgress('Ready for VR...', 60);
-                return true;
-            } catch (error) {
-                console.error('Preload error:', error);
-                return false;
-            }
-        }
-        
-        // Initialize map AFTER preloading
-        async function initializeMap() {
-            updateProgress('Initializing 3D map...', 70);
-            
-            map = new maptilersdk.Map({
-                container: 'map',
-                style: maptilersdk.MapStyle.STREETS,
-                center: [CENTER_LNG, CENTER_LAT],
-                zoom: 16,
-                pitch: 60,
-                bearing: -20,
-                antialias: true,
-                hash: false,
-                // Optimize for VR
-                maxPitch: 85,
-                optimizeForTerrain: true,
-                preserveDrawingBuffer: true, // Helps with WebGL context switching
-                contextAttributes: {
-                    xrCompatible: true,
-                    alpha: true,
-                    antialias: true,
-                    depth: true,
-                    stencil: false, // Disable for performance
-                    powerPreference: 'high-performance' // Quest 3 specific
-                }
-            });
-            
-            return new Promise((resolve) => {
-                map.on('load', async () => {
-                    updateProgress('Setting up 3D environment...', 80);
-                    
-                    // Add terrain with lower quality for VR
-                    map.addSource('terrain', {
-                        type: 'raster-dem',
-                        url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${API_KEY}`,
-                        tileSize: 256,
-                        maxzoom: 14 // Lower max zoom for performance
-                    });
-                    
-                    map.setTerrain({
-                        source: 'terrain',
-                        exaggeration: 1.2 // Reduced from 1.5 for VR
-                    });
-                    
-                    // Add 3D buildings with simplified rendering for VR
-                    map.addLayer({
-                        'id': '3d-buildings',
-                        'source': 'composite',
-                        'source-layer': 'building',
-                        'filter': ['==', 'extrude', 'true'],
-                        'type': 'fill-extrusion',
-                        'minzoom': 14,
-                        'paint': {
-                            'fill-extrusion-color': '#e0e0e0',
-                            'fill-extrusion-height': ['get', 'height'],
-                            'fill-extrusion-base': ['get', 'min_height'],
-                            'fill-extrusion-opacity': 0.85,
-                            'fill-extrusion-vertical-gradient': false // Disable for performance
-                        }
-                    });
-                    
-                    // Add optimized flood data
-                    updateProgress('Adding flood visualization...', 90);
-                    await addOptimizedFloodData();
-                    
-                    updateProgress('VR Ready!', 100);
-                    setTimeout(() => {
-                        hideLoading();
-                        resolve();
-                    }, 500);
+                // Add flood data as a GeoJSON source
+                map.addSource('flood-data', {
+                    type: 'geojson',
+                    data: data
                 });
-            });
-        }
-        
-        async function addOptimizedFloodData() {
-            if (!floodData) return;
-            
-            // Add flood data as a GeoJSON source
-            map.addSource('flood-data', {
-                type: 'geojson',
-                data: floodData,
-                // Optimize for performance
-                generateId: true,
-                promoteId: 'id',
-                maxzoom: 18
-            });
-            
-            // Add optimized extruded water layer for VR
-            map.addLayer({
-                'id': 'flood-water-3d',
-                'type': 'fill-extrusion',
-                'source': 'flood-data',
-                'minzoom': 13,
-                'maxzoom': 18,
-                'paint': {
-                    'fill-extrusion-color': [
-                        'interpolate',
-                        ['linear'],
-                        ['get', 'value'],
-                        0, '#bbdefb',
-                        0.5, '#42a5f5',
-                        1.0, '#1976d2',
-                        2.0, '#0d47a1'
-                    ],
-                    'fill-extrusion-height': [
-                        '*',
-                        ['get', 'value'],
-                        1
-                    ],
-                    'fill-extrusion-base': 0,
-                    'fill-extrusion-opacity': 0.65, // Reduced opacity for VR clarity
-                    'fill-extrusion-vertical-gradient': false, // Disable for performance
-                    'fill-extrusion-translate': [0, 0] // No offset for VR
-                }
-            });
-        }
-        
-        // Main initialization
-        async function initializeApp() {
-            const preloadSuccess = await preloadAssets();
-            if (!preloadSuccess) {
-                alert('Failed to load required data. Please refresh.');
-                return;
-            }
-            
-            await initializeMap();
-            await checkVRSupport();
-            setupVRControls();
-            
-            // Reduce map quality for better VR performance
-            optimizeForVR();
-        }
-        
-        function optimizeForVR() {
-            // Reduce map quality settings for better VR performance
-            if (map) {
-                map.setMaxTileCacheSize(50); // Reduce cache size
-                map.setRasterTileCacheSize(25); // Smaller tile cache
-                // Use lower resolution for Quest 3
-                map.setRenderWorldCopies(false);
+                
+                // Add extruded water layer (just like buildings)
+                map.addLayer({
+                    'id': 'flood-water-3d',
+                    'type': 'fill-extrusion',
+                    'source': 'flood-data',
+                    'paint': {
+                        // Color based on water depth (value property)
+                        'fill-extrusion-color': [
+                            'interpolate',
+                            ['linear'],
+                            ['get', 'value'],
+                            0, '#bbdefb',      // < 0.5m - light blue
+                            0.5, '#42a5f5',    // 0.5-1m - medium blue
+                            1.0, '#1976d2',    // 1-2m - dark blue
+                            2.0, '#0d47a1'     // > 2m - very dark blue
+                        ],
+                        // Height based on water depth
+                        'fill-extrusion-height': [
+                            '*',
+                            ['get', 'value'],
+                            1  // Scale factor: 1 meter of water = 1 meter height
+                        ],
+                        'fill-extrusion-base': 0,
+                        'fill-extrusion-opacity': 0.7
+                    }
+                });
+                
+                console.log('Flood water layer added successfully');
+                
+            } catch (err) {
+                console.error('Error loading flood data:', err);
+                alert('Error loading flood data: ' + err.message);
             }
         }
         
         async function checkVRSupport() {
-            if (navigator.xr) {
-                try {
-                    // Use requestSession to actually test VR availability
-                    vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
-                    
-                    if (vrSupported) {
-                        console.log('✅ Meta Quest 3 VR supported!');
-                        document.getElementById('vr-status').className = 'vr-available';
-                        document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
-                        document.getElementById('enter-vr-btn').style.display = 'block';
-                    } else {
-                        console.log('⚠️ VR not supported on this device');
-                        document.getElementById('vr-status').className = 'vr-unavailable';
-                        document.getElementById('vr-status').textContent = 'VR not supported on this device';
-                    }
-                } catch (error) {
-                    console.error('Error checking VR support:', error);
-                    document.getElementById('vr-status').className = 'vr-unavailable';
-                    document.getElementById('vr-status').textContent = 'Error checking VR support';
-                }
-            } else {
-                console.log('⚠️ WebXR not available');
-                document.getElementById('vr-status').className = 'vr-unavailable';
-                document.getElementById('vr-status').textContent = 'WebXR not available in this browser';
-            }
-        }
-        
-        function setupVRControls() {
-            const enterVRBtn = document.getElementById('enter-vr-btn');
+            const vrButton = document.getElementById('vrButton');
             
-            enterVRBtn.addEventListener('click', async () => {
-                if (!vrSupported) {
-                    alert('VR is not supported on your device/browser');
-                    return;
+            if (!navigator.xr) {
+                vrButton.textContent = '⚠️ WebXR Not Available';
+                vrButton.disabled = true;
+                return;
+            }
+            
+            try {
+                const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                
+                if (supported) {
+                    vrButton.textContent = '🥽 Enter VR Mode';
+                    vrButton.disabled = false;
+                    vrButton.onclick = enterVR;
+                    console.log('✅ VR ready on Meta Quest 3!');
+                } else {
+                    vrButton.textContent = '⚠️ VR Not Supported';
+                    vrButton.disabled = true;
+                    console.log('⚠️ VR not supported on this device');
                 }
-                
-                // Show loading overlay
-                showLoading('Entering VR Mode...');
-                enterVRBtn.classList.add('loading');
-                enterVRBtn.disabled = true;
-                
-                try {
-                    // Pre-warm VR session by reducing quality further
-                    optimizeForVREntry();
-                    
-                    // Request VR session with minimal features for faster startup
-                    const session = await navigator.xr.requestSession('immersive-vr', {
-                        requiredFeatures: ['local-floor', 'layers'], // Minimal features
-                        optionalFeatures: [] // No optional features for faster start
-                    });
-                    
-                    vrSession = session;
-                    
-                    // Use MapTiler's built-in AR/VR control
-                    const arControl = new maptilersdk.ARControl({
-                        session: session,
-                        onStart: () => {
-                            // VR session started successfully
-                            document.getElementById('vr-status').className = 'vr-active';
-                            document.getElementById('vr-status').textContent = 'VR MODE ACTIVE';
-                            enterVRBtn.textContent = 'EXITING VR...';
-                            hideLoading();
-                        }
-                    });
-                    
-                    // Add control and start VR
-                    map.addControl(arControl, 'bottom-right');
-                    arControl.start(session);
-                    
-                    // Handle session end
-                    session.addEventListener('end', () => {
-                        vrSession = null;
-                        document.getElementById('vr-status').className = 'vr-available';
-                        document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
-                        enterVRBtn.textContent = '🥽 ENTER VR MODE';
-                        enterVRBtn.classList.remove('loading');
-                        enterVRBtn.disabled = false;
-                        
-                        // Remove AR control
-                        map.removeControl(arControl);
-                    });
-                    
-                } catch (error) {
-                    console.error('Failed to enter VR:', error);
-                    hideLoading();
-                    alert('Failed to enter VR mode: ' + error.message);
-                    document.getElementById('vr-status').className = 'vr-available';
-                    document.getElementById('vr-status').textContent = 'VR Ready - Click button to enter';
-                    enterVRBtn.textContent = '🥽 ENTER VR MODE';
-                    enterVRBtn.classList.remove('loading');
-                    enterVRBtn.disabled = false;
-                }
-            });
-        }
-        
-        function optimizeForVREntry() {
-            // Further reduce quality when entering VR
-            if (map) {
-                // Reduce layer opacity for better VR performance
-                map.setPaintProperty('flood-water-3d', 'fill-extrusion-opacity', 0.6);
-                map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', 0.8);
-                
-                // Disable anti-aliasing for VR (Quest 3 handles this better)
-                map.getCanvas().getContext('webgl').getContextAttributes().antialias = false;
+            } catch (err) {
+                vrButton.textContent = '⚠️ VR Check Failed';
+                vrButton.disabled = true;
+                console.error('VR support check error:', err);
             }
         }
         
-        // Loading overlay functions
-        function showLoading(text) {
-            document.getElementById('loading-text').textContent = text;
-            document.getElementById('loading-overlay').style.display = 'flex';
+        async function enterVR() {
+            if (!navigator.xr) return;
+            
+            const vrButton = document.getElementById('vrButton');
+            
+            try {
+                // Request VR session
+                xrSession = await navigator.xr.requestSession('immersive-vr', {
+                    optionalFeatures: ['local-floor', 'bounded-floor']
+                });
+                
+                // Get the MapTiler map's WebGL context for VR rendering
+                const canvas = map.getCanvas();
+                const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                
+                if (!gl) {
+                    throw new Error('WebGL context not available');
+                }
+                
+                // Setup XR layer
+                const layer = new XRWebGLLayer(xrSession, gl);
+                await xrSession.updateRenderState({ baseLayer: layer });
+                
+                vrButton.textContent = '🥽 VR Active - Exit in Headset';
+                vrButton.disabled = true;
+                
+                console.log('✅ Entered VR mode!');
+                
+                // Handle session end
+                xrSession.addEventListener('end', () => {
+                    xrSession = null;
+                    vrButton.textContent = '🥽 Enter VR Mode';
+                    vrButton.disabled = false;
+                    console.log('Exited VR mode');
+                });
+                
+                // Start rendering loop
+                xrSession.requestAnimationFrame(onXRFrame);
+                
+            } catch (err) {
+                console.error('Error entering VR:', err);
+                alert('Failed to enter VR mode: ' + err.message);
+                vrButton.textContent = '🥽 Enter VR Mode';
+                vrButton.disabled = false;
+            }
         }
         
-        function hideLoading() {
-            document.getElementById('loading-overlay').style.display = 'none';
-            loadingProgress = 0;
+        function onXRFrame(time, frame) {
+            if (!xrSession) return;
+            
+            xrSession.requestAnimationFrame(onXRFrame);
+            
+            // MapTiler handles the rendering internally
+            // The map will render to the VR display
+            map.triggerRepaint();
         }
-        
-        function updateProgress(text, percent) {
-            document.getElementById('loading-text').textContent = text;
-            document.getElementById('loading-progress').textContent = `${percent}%`;
-            loadingProgress = percent;
-        }
-        
-        // Initialize the app
-        initializeApp();
         
         // Keyboard controls for desktop navigation
         window.addEventListener('keydown', (e) => {
-            if (!map) return;
-            
             switch(e.key.toLowerCase()) {
                 case 'w': map.panBy([0, -50]); break;
                 case 's': map.panBy([0, 50]); break;
@@ -519,7 +328,7 @@
         
         // Handle resize
         window.addEventListener('resize', () => {
-            if (map) map.resize();
+            map.resize();
         });
     </script>
 </body>
