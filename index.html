@@ -153,18 +153,39 @@
                 exaggeration: 1.5
             });
             
+            // Add MapTiler OpenMapTiles source for buildings
+            map.addSource('openmaptiles', {
+                type: 'vector',
+                url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${API_KEY}`
+            });
+            
             // Add 3D buildings - extruded
             map.addLayer({
                 'id': '3d-buildings',
-                'source': 'composite',
+                'source': 'openmaptiles',
                 'source-layer': 'building',
-                'filter': ['==', 'extrude', 'true'],
                 'type': 'fill-extrusion',
                 'minzoom': 14,
                 'paint': {
                     'fill-extrusion-color': '#e0e0e0',
-                    'fill-extrusion-height': ['get', 'height'],
-                    'fill-extrusion-base': ['get', 'min_height'],
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['coalesce', ['get', 'render_height'], 5]
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['coalesce', ['get', 'render_min_height'], 0]
+                    ],
                     'fill-extrusion-opacity': 0.9
                 }
             });
@@ -258,25 +279,47 @@
             const vrButton = document.getElementById('vrButton');
             
             try {
+                vrButton.textContent = 'Loading VR...';
+                vrButton.disabled = true;
+                
                 // Request VR session
                 xrSession = await navigator.xr.requestSession('immersive-vr', {
-                    optionalFeatures: ['local-floor', 'bounded-floor']
+                    requiredFeatures: ['local-floor'],
+                    optionalFeatures: ['bounded-floor', 'hand-tracking']
                 });
                 
-                // Get the MapTiler map's WebGL context for VR rendering
+                // Get the MapTiler canvas and GL context
                 const canvas = map.getCanvas();
-                const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                const gl = canvas.getContext('webgl2', { xrCompatible: true }) || 
+                          canvas.getContext('webgl', { xrCompatible: true });
                 
                 if (!gl) {
                     throw new Error('WebGL context not available');
                 }
                 
-                // Setup XR layer
-                const layer = new XRWebGLLayer(xrSession, gl);
-                await xrSession.updateRenderState({ baseLayer: layer });
+                // Make context XR compatible if not already
+                await gl.makeXRCompatible();
                 
-                vrButton.textContent = '🥽 VR Active - Exit in Headset';
-                vrButton.disabled = true;
+                // Create XR layer
+                const xrLayer = new XRWebGLLayer(xrSession, gl, {
+                    antialias: true,
+                    depth: true,
+                    stencil: false,
+                    alpha: true,
+                    framebufferScaleFactor: 1.0
+                });
+                
+                // Update render state
+                await xrSession.updateRenderState({ 
+                    baseLayer: xrLayer,
+                    depthNear: 0.1,
+                    depthFar: 1000.0
+                });
+                
+                // Get reference space
+                const refSpace = await xrSession.requestReferenceSpace('local-floor');
+                
+                vrButton.textContent = '🥽 VR Active';
                 
                 console.log('✅ Entered VR mode!');
                 
@@ -288,14 +331,33 @@
                     console.log('Exited VR mode');
                 });
                 
-                // Start rendering loop
-                xrSession.requestAnimationFrame(onXRFrame);
+                // Start animation frame with reference space
+                const animate = (time, frame) => {
+                    if (!xrSession) return;
+                    
+                    xrSession.requestAnimationFrame(animate);
+                    
+                    if (frame) {
+                        const pose = frame.getViewerPose(refSpace);
+                        if (pose) {
+                            // MapTiler will handle the rendering
+                            map.triggerRepaint();
+                        }
+                    }
+                };
+                
+                xrSession.requestAnimationFrame(animate);
                 
             } catch (err) {
                 console.error('Error entering VR:', err);
                 alert('Failed to enter VR mode: ' + err.message);
                 vrButton.textContent = '🥽 Enter VR Mode';
                 vrButton.disabled = false;
+                
+                if (xrSession) {
+                    xrSession.end();
+                    xrSession = null;
+                }
             }
         }
         
