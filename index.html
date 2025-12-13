@@ -58,30 +58,6 @@
             border-radius: 4px;
         }
         
-        #vrButton {
-            width: 100%;
-            padding: 18px;
-            margin-top: 15px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-        }
-        
-        #vrButton:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-        }
-        #vrButton:disabled { 
-            background: #999; 
-            cursor: not-allowed; 
-            transform: none;
-        }
         
         .info-box {
             margin-top: 12px;
@@ -138,10 +114,7 @@
     </div>
     
     <div id="ui">
-        <h3>🌊 VR Flood Visualization</h3>
-        <div style="font-size: 12px; color: #666; margin-bottom: 12px;">
-            Optimized for Meta Quest 3
-        </div>
+        
         <div class="legend-item">
             <div class="legend-color" style="background:#bbdefb;"></div>
             &lt; 0.5 m depth
@@ -157,14 +130,6 @@
         <div class="legend-item">
             <div class="legend-color" style="background:#0d47a1;"></div>
             &gt; 2 m depth
-        </div>
-        <button id="vrButton" disabled>Initializing...</button>
-        <div class="info-box">
-            <strong>🥽 VR Controls:</strong>
-            Look around: Move your head<br>
-            Move: Use thumbsticks<br>
-            Teleport: Point & trigger<br>
-            Height: Y button (up/down)
         </div>
     </div>
 
