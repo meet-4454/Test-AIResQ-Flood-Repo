@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Flood Visualization - Meta Quest 3</title>
+    <title>3D Flood Visualization</title>
     <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.js"></script>
     <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -17,15 +17,6 @@
         }
         #map { width: 100vw; height: 100vh; }
         
-        #vrCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: none;
-        }
-        
         #ui {
             position: absolute;
             top: 20px;
@@ -35,7 +26,7 @@
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.2);
             z-index: 1000;
-            max-width: 320px;
+            max-width: 280px;
         }
         
         #ui h3 { 
@@ -58,20 +49,46 @@
             border-radius: 4px;
         }
         
-        
-        .info-box {
-            margin-top: 12px;
-            padding: 12px;
-            background: linear-gradient(135deg, #e0f2fe, #dbeafe);
-            border-radius: 8px;
-            font-size: 12px;
-            border-left: 4px solid #3b82f6;
+        #bottomControls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
         }
         
-        .info-box strong {
-            display: block;
-            margin-bottom: 6px;
-            color: #1e40af;
+        #fullscreenButton {
+            width: 50px;
+            height: 50px;
+            background: rgba(255,255,255,0.95);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 24px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #fullscreenButton:hover {
+            background: white;
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        #vrNote {
+            background: rgba(102, 126, 234, 0.95);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         }
         
         #loadingMsg {
@@ -107,41 +124,43 @@
 </head>
 <body>
     <div id="map"></div>
-    <canvas id="vrCanvas"></canvas>
     <div id="loadingMsg">
-        <div>Loading VR Environment...</div>
+        <div>Loading Flood Data...</div>
         <div class="loader"></div>
     </div>
     
     <div id="ui">
-        <h3>3D Flood Visualization</h3>
+        <h3>🌊 3D Flood Visualization</h3>
+        <div style="font-size: 13px; font-weight: 600; color: #444; margin-bottom: 12px;">
+            Depth Range (meters)
+        </div>
         <div class="legend-item">
             <div class="legend-color" style="background:#bbdefb;"></div>
-            &lt; 0.5 m depth
+            &lt; 0.5 m
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background:#42a5f5;"></div>
-            0.5 – 1 m depth
+            0.5 – 1 m
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background:#1976d2;"></div>
-            1 – 2 m depth
+            1 – 2 m
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background:#0d47a1;"></div>
-            &gt; 2 m depth
+            &gt; 2 m
         </div>
+    </div>
+    
+    <div id="bottomControls">
+        <button id="fullscreenButton" title="Toggle Fullscreen">⛶</button>
+        <div id="vrNote">Best viewed in VR!</div>
     </div>
 
     <script>
         let map, scene, camera, renderer, modelTransform;
-        let vrScene, vrCamera, vrRenderer;
         let waterMeshes = [];
-        let buildings = [];
-        let controller1, controller2;
-        let dolly, cameraGroup;
         let floodData = null;
-        let isVRSupported = false;
         
         const API_KEY = '3vyFCdEjKRCq9JRv9kWH';
         const GEOJSON_FILE = 'gridded_30m_T1_flood_only.geojson';
@@ -149,6 +168,15 @@
         const CENTER_LAT = 28.448;
         
         maptilersdk.config.apiKey = API_KEY;
+        
+        // Fullscreen toggle
+        document.getElementById('fullscreenButton').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        });
         
         // Initialize 2D map first
         map = new maptilersdk.Map({
@@ -260,28 +288,15 @@
         
         async function loadFloodData() {
             try {
+                document.getElementById('loadingMsg').style.display = 'block';
                 const res = await fetch(GEOJSON_FILE);
                 if (!res.ok) throw new Error('Flood data file not found');
                 floodData = await res.json();
                 createWater(floodData);
-                
-                // Check WebXR support
-                if (navigator.xr) {
-                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
-                    isVRSupported = supported;
-                    
-                    document.getElementById('vrButton').disabled = false;
-                    document.getElementById('vrButton').textContent = supported ? 
-                        '🥽 Enter VR (Quest 3)' : '⚠️ VR Not Supported';
-                    
-                    if (supported) {
-                        document.getElementById('vrButton').onclick = initVR;
-                    }
-                } else {
-                    document.getElementById('vrButton').textContent = '⚠️ WebXR Not Available';
-                }
+                document.getElementById('loadingMsg').style.display = 'none';
             } catch (err) {
                 console.error('Error loading flood data:', err);
+                document.getElementById('loadingMsg').style.display = 'none';
                 alert('Error loading flood data: ' + err.message);
             }
         }
@@ -374,303 +389,9 @@
             });
         }
         
-        async function initVR() {
-            if (!isVRSupported) {
-                alert('VR is not supported on this device');
-                return;
-            }
-            
-            document.getElementById('loadingMsg').style.display = 'block';
-            
-            // Create VR scene
-            vrScene = new THREE.Scene();
-            vrScene.background = new THREE.Color(0x87ceeb);
-            
-            // Add fog for depth perception
-            vrScene.fog = new THREE.Fog(0x87ceeb, 50, 500);
-            
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            vrScene.add(ambientLight);
-            
-            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            sunLight.position.set(100, 200, 100);
-            sunLight.castShadow = true;
-            vrScene.add(sunLight);
-            
-            const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-            fillLight.position.set(-100, 100, -100);
-            vrScene.add(fillLight);
-            
-            // Create dolly for VR movement
-            dolly = new THREE.Group();
-            dolly.position.set(0, 15, 0); // Start 15m above ground
-            vrScene.add(dolly);
-            
-            // Camera group for head tracking
-            cameraGroup = new THREE.Group();
-            dolly.add(cameraGroup);
-            
-            // VR Camera
-            vrCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            cameraGroup.add(vrCamera);
-            
-            // VR Renderer
-            const canvas = document.getElementById('vrCanvas');
-            vrRenderer = new THREE.WebGLRenderer({ 
-                canvas: canvas,
-                antialias: true,
-                alpha: true
-            });
-            vrRenderer.setPixelRatio(window.devicePixelRatio);
-            vrRenderer.setSize(window.innerWidth, window.innerHeight);
-            vrRenderer.xr.enabled = true;
-            
-            // Copy water meshes to VR scene
-            waterMeshes.forEach(mesh => {
-                const clonedGeom = mesh.geometry.clone();
-                const clonedMat = mesh.material.clone();
-                const vrMesh = new THREE.Mesh(clonedGeom, clonedMat);
-                vrScene.add(vrMesh);
-            });
-            
-            // Load MapTiler satellite/street tiles as ground texture
-            await loadMapTiles();
-            
-            // Add simple buildings
-            createVRBuildings();
-            
-            // Setup controllers
-            setupControllers();
-            
-            // Start VR session
-            try {
-                const session = await navigator.xr.requestSession('immersive-vr', {
-                    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-                });
-                
-                await vrRenderer.xr.setSession(session);
-                
-                document.getElementById('map').style.display = 'none';
-                document.getElementById('ui').style.display = 'none';
-                document.getElementById('vrCanvas').style.display = 'block';
-                document.getElementById('loadingMsg').style.display = 'none';
-                
-                // Start animation loop
-                vrRenderer.setAnimationLoop(renderVR);
-                
-                session.addEventListener('end', onVRSessionEnd);
-            } catch (err) {
-                console.error('Error starting VR session:', err);
-                alert('Failed to start VR: ' + err.message);
-                document.getElementById('loadingMsg').style.display = 'none';
-            }
-        }
-        
-        async function loadMapTiles() {
-            // Calculate tile coordinates for the center point at zoom 16
-            const zoom = 16;
-            const tileSize = 512;
-            const lat = CENTER_LAT;
-            const lng = CENTER_LNG;
-            
-            // Convert lat/lng to tile coordinates
-            const n = Math.pow(2, zoom);
-            const xtile = Math.floor((lng + 180) / 360 * n);
-            const ytile = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
-            
-            // Load 3x3 grid of tiles centered on our location
-            const tilePromises = [];
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    tilePromises.push(loadSingleTile(xtile + dx, ytile + dy, zoom));
-                }
-            }
-            
-            const tiles = await Promise.all(tilePromises);
-            
-            // Create ground with tiles
-            tiles.forEach((tile, idx) => {
-                if (tile) {
-                    const dx = (idx % 3) - 1;
-                    const dy = Math.floor(idx / 3) - 1;
-                    
-                    const groundGeom = new THREE.PlaneGeometry(tileSize, tileSize);
-                    const groundMat = new THREE.MeshStandardMaterial({ 
-                        map: tile,
-                        roughness: 0.9
-                    });
-                    const ground = new THREE.Mesh(groundGeom, groundMat);
-                    ground.rotation.x = -Math.PI / 2;
-                    ground.position.set(dx * tileSize, -0.1, dy * tileSize);
-                    vrScene.add(ground);
-                }
-            });
-        }
-        
-        async function loadSingleTile(x, y, z) {
-            try {
-                // MapTiler satellite or streets tile URL
-                const url = `https://api.maptiler.com/maps/hybrid/${z}/${x}/${y}.jpg?key=${API_KEY}`;
-                
-                const texture = await new Promise((resolve, reject) => {
-                    const loader = new THREE.TextureLoader();
-                    loader.load(
-                        url,
-                        (tex) => {
-                            tex.wrapS = THREE.ClampToEdgeWrapping;
-                            tex.wrapT = THREE.ClampToEdgeWrapping;
-                            resolve(tex);
-                        },
-                        undefined,
-                        (err) => {
-                            console.error('Error loading tile:', err);
-                            resolve(null);
-                        }
-                    );
-                });
-                
-                return texture;
-            } catch (err) {
-                console.error('Tile load error:', err);
-                return null;
-            }
-        }
-        
-        function createVRBuildings() {
-            // Create realistic building representations based on common building footprints
-            const buildingPositions = [
-                { x: -50, z: -50, w: 20, h: 30, d: 20 },
-                { x: 30, z: -60, w: 25, h: 40, d: 25 },
-                { x: -70, z: 40, w: 15, h: 25, d: 15 },
-                { x: 50, z: 50, w: 30, h: 35, d: 20 },
-                { x: 0, z: -80, w: 20, h: 28, d: 20 },
-                { x: -40, z: 70, w: 18, h: 32, d: 18 },
-                { x: 80, z: -30, w: 22, h: 45, d: 22 },
-                { x: -90, z: -20, w: 16, h: 26, d: 16 },
-            ];
-            
-            buildingPositions.forEach(b => {
-                const geom = new THREE.BoxGeometry(b.w, b.h, b.d);
-                const mat = new THREE.MeshStandardMaterial({ 
-                    color: 0xe5e5e5,
-                    roughness: 0.7,
-                    metalness: 0.2
-                });
-                const building = new THREE.Mesh(geom, mat);
-                building.position.set(b.x, b.h / 2, b.z);
-                building.castShadow = true;
-                building.receiveShadow = true;
-                vrScene.add(building);
-                buildings.push(building);
-            });
-        }
-        
-        function setupControllers() {
-            // Controller 1 (left hand)
-            controller1 = vrRenderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.addEventListener('selectend', onSelectEnd);
-            dolly.add(controller1);
-            
-            // Controller 2 (right hand)
-            controller2 = vrRenderer.xr.getController(1);
-            controller2.addEventListener('selectstart', onSelectStart);
-            controller2.addEventListener('selectend', onSelectEnd);
-            dolly.add(controller2);
-            
-            // Add controller models
-            const geometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 0, -1)
-            ]);
-            
-            const line1 = new THREE.Line(geometry);
-            line1.name = 'line';
-            line1.scale.z = 5;
-            controller1.add(line1.clone());
-            
-            const line2 = new THREE.Line(geometry);
-            line2.name = 'line';
-            line2.scale.z = 5;
-            controller2.add(line2.clone());
-        }
-        
-        let moveSpeed = 0.5;
-        
-        function onSelectStart(event) {
-            const controller = event.target;
-            // Teleport or interaction logic
-        }
-        
-        function onSelectEnd(event) {
-            const controller = event.target;
-        }
-        
-        function handleControllerInput() {
-            const session = vrRenderer.xr.getSession();
-            if (!session) return;
-            
-            for (const source of session.inputSources) {
-                if (source.gamepad) {
-                    const gamepad = source.gamepad;
-                    
-                    // Thumbstick movement
-                    if (gamepad.axes.length >= 2) {
-                        const x = gamepad.axes[2] || 0;
-                        const z = gamepad.axes[3] || 0;
-                        
-                        if (Math.abs(x) > 0.1 || Math.abs(z) > 0.1) {
-                            const direction = new THREE.Vector3(x, 0, -z);
-                            direction.applyQuaternion(dolly.quaternion);
-                            direction.multiplyScalar(moveSpeed);
-                            dolly.position.add(direction);
-                        }
-                    }
-                    
-                    // Y button for height adjustment (button 4)
-                    if (gamepad.buttons[4] && gamepad.buttons[4].pressed) {
-                        dolly.position.y += 0.3;
-                    }
-                    
-                    // X button for descend (button 5)
-                    if (gamepad.buttons[5] && gamepad.buttons[5].pressed) {
-                        dolly.position.y = Math.max(5, dolly.position.y - 0.3);
-                    }
-                }
-            }
-        }
-        
-        function renderVR(time, frame) {
-            handleControllerInput();
-            
-            // Update water animation
-            const t = time * 0.001;
-            vrScene.traverse(obj => {
-                if (obj.material && obj.material.uniforms && obj.material.uniforms.time) {
-                    obj.material.uniforms.time.value = t;
-                }
-            });
-            
-            vrRenderer.render(vrScene, vrCamera);
-        }
-        
-        function onVRSessionEnd() {
-            document.getElementById('map').style.display = 'block';
-            document.getElementById('ui').style.display = 'block';
-            document.getElementById('vrCanvas').style.display = 'none';
-            vrRenderer.setAnimationLoop(null);
-        }
-        
         // Handle window resize
         window.addEventListener('resize', () => {
-            if (vrRenderer) {
-                vrRenderer.setSize(window.innerWidth, window.innerHeight);
-                if (vrCamera) {
-                    vrCamera.aspect = window.innerWidth / window.innerHeight;
-                    vrCamera.updateProjectionMatrix();
-                }
-            }
+            map.resize();
         });
     </script>
 </body>
